@@ -1,5 +1,7 @@
 # dsh-compaction-policy-engine
 
+**English** | [简体中文](README.zh-CN.md)
+
 **Per-model context compaction policy for DeepSeek Harness — three-layer thresholds, live reload and summarization-model selection, on top of the official compaction engine.**
 
 The official `@deepseek-ai/dsh-compaction-basic` already supports a threshold, a

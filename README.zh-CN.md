@@ -1,5 +1,7 @@
 # dsh-compaction-policy-engine
 
+[English](README.md) | **简体中文**
+
 **DeepSeek Harness 的按模型上下文压缩策略——三层阈值、热加载与摘要模型选择，构建在官方压缩引擎之上。**
 
 官方 `@deepseek-ai/dsh-compaction-basic` 已经支持阈值、摘要模型，以及通过 `modelPolicies`
