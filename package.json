@@ -1,0 +1,72 @@
+{
+  "name": "dsh-compaction-policy-engine",
+  "version": "0.5.0",
+  "description": "Layered, live-reloading context compaction policy for DeepSeek Harness: provider-level rules, field-by-field inheritance, ratio/token units and a settings panel on top of the official engine.",
+  "type": "module",
+  "main": "lib/companion.js",
+  "exports": {
+    ".": "./lib/companion.js",
+    "./engine": "./lib/engine.js",
+    "./policy": "./lib/policy.js",
+    "./client-policy": "./lib/client-policy.js",
+    "./client": "./lib/client.js"
+  },
+  "files": [
+    "lib",
+    "docs",
+    "examples",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh-CN.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "prepublishOnly": "npm test"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "cordis",
+    "compaction",
+    "context-management",
+    "threshold",
+    "summarization"
+  ],
+  "license": "MIT",
+  "author": "T-splines",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/T-splines/dsh-compaction-policy-engine.git"
+  },
+  "homepage": "https://github.com/T-splines/dsh-compaction-policy-engine#readme",
+  "bugs": {
+    "url": "https://github.com/T-splines/dsh-compaction-policy-engine/issues"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-compaction-basic": "^0.2.2-rc.1",
+    "@deepseek-ai/schemastery": "^3.18.2",
+    "@deepseek-ai/cosmokit": "^1.8.3"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-api-remotes"
+      ]
+    }
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "dsh": ">=0.2.2-0 <0.3.0-0"
+  }
+}

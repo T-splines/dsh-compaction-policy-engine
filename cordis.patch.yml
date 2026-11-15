@@ -1,0 +1,61 @@
+# Plugin bundle for dsh-compaction-policy-engine: mounts the policy engine (inert by
+# default) and the always-enabled host-plane companion.
+#
+# The engine subclasses `BasicCompactionEngine`, so region selection, tool-pairing
+# balance, summary framing, and the durable compaction transaction stay the
+# official implementation — only the policy (three-layer threshold + summarization
+# model) becomes configurable here.
+#
+# `ctx.compaction` is a single-slot seam: enabling this row means the stock
+# `compaction-basic` row must be disabled in the same profile. This bundle
+# deliberately does not do that for you, and ships the engine `disabled`:
+# superseding the stock engine is a deployment decision, and a bundle that turned
+# itself on without also re-enabling `compaction-basic` would leave the profile
+# with no compaction at all. Enable both in the same patch:
+#
+#   - id: compaction-basic
+#     disabled: true
+#
+#   - id: compaction-control
+#     disabled: false
+#     config:
+#       default:
+#         threshold: 0.8            # ratio of the adapter-declared window
+#         summarizationModel: auto  # `auto` = the conversation's own model
+#       providers:
+#         gateway-b:
+#           threshold: 0.5
+#       models:
+#         - provider: local
+#           model: model-g
+#           threshold: 0.9
+#
+# Thresholds are ratios, never absolute token counts: a model's advertised window
+# is not stable, and a model that declares no window cannot honor a token budget.
+#
+# The companion row below is a **separate, enabled, host-plane** row because the
+# browser bundle is discovered from enabled loader entries (`dsh-client-modules`
+# walks `ctx.loader.entries()` and skips disabled or fiberless ones) — the engine
+# row is disabled by default and normally mounted inside an agent preset, where
+# that scan cannot see it. It deliberately does NOT claim `ctx.compaction`: the
+# seam resolves per realm, so a host-plane engine would run *beside* the preset
+# one on the same bubbling `agent/pre-step` and the lower threshold would win.
+#
+# `name` is the **bare package name**, which resolves to `lib/companion.js`. That
+# split is load-bearing: the loader mounts a row's `exports.default` and reads no
+# entry option, so this row can never mount the engine. (It once carried an
+# `export:` key, which was silently dropped — putting a second engine on the host
+# plane at the shipped default and capping every raised threshold. Two
+# `[compact-debug]` lines per step with the same `measured` were the signature.)
+- insert:
+    - id: compaction-control
+      name: 'dsh-compaction-policy-engine/engine'
+      disabled: true
+
+- insert:
+    - id: compaction-control-settings
+      name: 'dsh-compaction-policy-engine'
+      config:
+        default:
+          threshold: 0.8
+          retain: 0.16

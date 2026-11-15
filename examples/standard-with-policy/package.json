@@ -1,0 +1,12 @@
+{
+  "name": "dsh-standard-compaction-policy-example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Example bundle: override the DSH standard preset to use dsh-compaction-policy-engine.",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
