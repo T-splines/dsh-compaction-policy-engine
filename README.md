@@ -1,95 +1,84 @@
 # dsh-compaction-policy-engine
 
-**English** | [简体中文](https://github.com/T-splines/dsh-compaction-policy-engine/blob/main/README.zh-CN.md)
+[English](https://github.com/T-splines/dsh-compaction-policy-engine/blob/main/README.en.md) | **简体中文**
 
-**Per-model context compaction policy for DeepSeek Harness — three-layer thresholds, live reload and summarization-model selection, on top of the official compaction engine.**
+**DeepSeek Harness 的按模型上下文压缩策略——三层阈值、热加载与摘要模型选择，构建在官方压缩引擎之上。**
 
-The official `@deepseek-ai/dsh-compaction-basic` already supports a threshold, a
-summarization model, and exact per-`(provider, model)` overrides through `modelPolicies`.
-This plugin subclasses that engine and adds the layer above it:
+官方 `@deepseek-ai/dsh-compaction-basic` 已经支持阈值、摘要模型，以及通过 `modelPolicies`
+给精确 `(provider, model)` 覆盖。本插件是它的子类，在它之上再加一层：
 
-- **provider-level layers** — one rule for every model behind a provider, instead of
-  enumerating each model id;
-- **field-by-field inheritance** — a model can override `threshold` while inheriting
-  `retain`, `maxTokens` and the summarizer from its provider or the global layer;
-- **ratio or absolute-token units**, converted against the route's declared window;
-- **live reload plus a settings panel and session badge**;
-- **a summarization fallback chain** and a context-policy prompt.
+- **供应商层**——一条规则覆盖该 provider 后面的所有模型，不必逐个枚举模型 id；
+- **逐字段继承**——模型层只覆盖 `threshold`，`retain`、`maxTokens`、摘要路由仍从供应商层或
+  全局层继承；
+- **比例与绝对 token 双单位**，按路由声明的窗口换算；
+- **热加载 + 设置面板 + 会话徽标**；
+- **摘要回退链**与上下文策略提示词。
 
-Region selection, tool-pairing balance, summary framing and the durable compaction
-transaction remain the official implementation. If you only need a few exact
-`(provider, model)` overrides, the official `modelPolicies` already covers you; this plugin
-is for layered policy across many routes.
+选区、工具配对平衡、摘要框架、落盘事务全部沿用官方实现。如果你只需要少量精确
+`(provider, model)` 覆盖，官方 `modelPolicies` 已经够用；本插件面向的是跨很多路由的分层策略。
 
-- [Why this exists](#why-this-exists)
-- [What makes it different](#what-makes-it-different)
-- [Install and mount](#install-and-mount)
-- [Configuration](#configuration)
-- [How policy is resolved](#how-policy-is-resolved)
-- [Settings panel](#settings-panel)
-- [Behavior guarantees](#behavior-guarantees)
-- [Tests](#tests)
-- [Compatibility and migration](#compatibility-and-migration)
+- [为什么需要它](#为什么需要它)
+- [差异点](#差异点)
+- [安装与挂载](#安装与挂载)
+- [配置](#配置)
+- [策略如何解析](#策略如何解析)
+- [设置面板](#设置面板)
+- [行为保证](#行为保证)
+- [测试](#测试)
+- [兼容与迁移](#兼容与迁移)
 
-## Why this exists
+## 为什么需要它
 
-The official engine's `modelPolicies` are exact `(provider, model)` pairs. When one gateway
-exposes many model ids, or when several routes share the same policy, enumerating every pair
-is brittle: a newly added model silently falls back to the global threshold until someone
-adds it. This plugin lets one provider-level row cover every model behind that provider, and
-resolves `models[] → providers{} → default` field by field.
+官方引擎的 `modelPolicies` 是精确 `(provider, model)` 对。当一个网关暴露很多模型 id，或者
+多条路由共享同一套策略时，逐个枚举既啰嗦又脆弱：新加的模型会静默落回全局阈值，直到有人补上
+一行。本插件允许一条供应商层规则覆盖该 provider 的所有模型，并按
+`models[] → providers{} → default` 逐字段解析。
 
 ```
 models[]  →  providers{}  →  default
 ```
 
-A model can override `threshold` while still inheriting `retain`, `maxTokens`,
-`headroomTokens` and the summarization route from the provider or global layer.
+模型层可以只覆盖 `threshold`，`retain`、`maxTokens`、`headroomTokens` 和摘要路由继续从供应商
+层或全局层继承。
 
-## What makes it different
+## 差异点
 
-- **Three-layer policy, per-field.** `models[]` → `providers{}` → `default`. Changing one
-  field does not require copying the whole layer, and one provider row covers every model
-  behind that provider.
-- **Ratio or absolute tokens.** `threshold` / `retain` are ratios of the route's declared
-  window; `thresholdTokens` / `retainTokens` are absolute budgets. The plugin converts
-  exactly back into the parent engine's ratio (`(tokens + 0.5) / window`) and **refuses to
-  guess** when a route declares no window, naming the route in the error.
-- **Live reload.** The engine polls `settings.yaml` and the `compaction-control-settings`
-  row every second; a policy edit applies to the next compaction without restarting DSH.
-  The panel writes the same document. The engine mount row's own `config:` is read at load
-  (see [Install and mount](#install-and-mount)).
-- **Partial settings document.** The `compaction-control:` section in `settings.yaml` is
-  merged **per field** with the mount config (maps recurse, arrays replace wholesale), so a
-  panel save cannot silently erase a `models[]` layer written in the profile.
-- **Settings panel.** Edit the global layer or a provider layer, switch units without
-  leaving both keys behind, see warnings for an un-compactable gap, and see the session
-  badge's current trigger point and the route that actually wrote the last summary.
-- **Summarization fallback chain.** `summarizationFallback` lists routes to try when the
-  primary summarizer fails, so one broken summarizer route does not disable compaction.
-- **Context-policy prompt.** The companion registers a prompt section telling the model that
-  context management is automatic and that it cannot measure its own usage — preventing the
-  "I think my context is nearly full" refusal loop observed in long sessions.
-- **Manual `/compact` is durable.** A client disconnect or reconnect does not kill a 20–40 s
-  compaction transaction; the command reports the real reason when it cannot start.
-- **Tested.** 198 `node --test` cases across 13 files, including a real-bundle client
-  evaluation, policy resolution, unit conversion, patch-file parsing and manual-compaction
-  retention.
+- **三层策略、逐字段。** `models[]` → `providers{}` → `default`；改一个字段不需要抄整层，
+  一条供应商行覆盖该 provider 后面的所有模型。
+- **比例或绝对 token 两种单位。** `threshold` / `retain` 按路由声明的窗口换算；
+  `thresholdTokens` / `retainTokens` 是绝对预算。换算写回父类时使用
+  `(tokens + 0.5) / window`，保证精确回到声明的数；路由没有声明窗口时**拒绝猜**，
+  在真正需要策略的那一步报错并点名路由。
+- **热加载。** 引擎每秒轮询 `settings.yaml` 与 `compaction-control-settings` 行；策略修改在
+  下一次压缩生效，不需要重启。面板写的是同一份文档。引擎挂载行自己的 `config:` 在加载时读取
+  （见[安装与挂载](#安装与挂载)）。
+- **部分文档合并。** `settings.yaml` 的 `compaction-control:` 段与挂载行 `config:` **逐字段**
+  合并（映射递归、数组整体替换），面板保存不会悄悄抹掉 profile 里的 `models[]` 层。
+- **设置面板。** 编辑全局层或某个供应商层，切换单位时不留下两个键，空隙过小时给出红字提示；
+  会话头徽标显示当前触发点和「上一次摘要实际由哪条路由写」。
+- **摘要回退链。** `summarizationFallback` 在主摘要路由失败时按序尝试其它路由，避免一条坏
+  路由让整个压缩停摆。
+- **上下文策略提示词。** companion 注册一段系统提示：上下文管理是自动的，模型无法测量自己的
+  用量，不得因为自认为「上下文快满了」而停止、缩短或移交工作。
+- **手动 `/compact` 是持久工作。** 客户端断线/重连不会杀死一次 20–40 秒的压缩事务；无法开始
+  时如实报告原因，不把空锁说成「已有压缩在跑」。
+- **有测试。** 198 个 `node --test` 用例，分布在 13 个文件，覆盖真实 bundle 渲染、三层解析、
+  单位换算、补丁文件解析和手动压缩保留量。
 
-## Install and mount
+## 安装与挂载
 
-Requirements: DSH `0.2.2-rc.x`, Node.js 20+.
+要求：DSH `0.2.2-rc.x`、Node.js 20+。
 
-### From npm
+### 从 npm 安装
 
 ```bash
 dsh plugin --profile web add @magic6/dsh-compaction-policy-engine
 ```
 
-The npm package includes `examples/standard-with-policy` for reference; the preset override
-rules below still apply. The `$PWD` commands in the web section assume a source checkout.
+npm 包里包含 `examples/standard-with-policy` 供参考；下面的 preset 覆盖规则仍然适用。
+web 小节里的 `$PWD` 命令假设使用源码检出。
 
-### From source
+### 从源码安装
 
 ```bash
 git clone https://github.com/T-splines/dsh-compaction-policy-engine.git
@@ -97,29 +86,26 @@ cd dsh-compaction-policy-engine
 dsh plugin --profile web add "$PWD"
 ```
 
-The package is a bundle. It mounts:
+包本身是 bundle，会挂两行：
 
-- an **engine row** (`compaction-control`), **disabled by default**, and
-- an **always-enabled companion row** (`compaction-control-settings`) that serves the
-  settings card and the context-policy prompt. It deliberately does **not** claim
-  `ctx.compaction`.
+- **引擎行**（`compaction-control`），**默认 disabled**；
+- **companion 行**（`compaction-control-settings`），始终启用，负责设置卡片与上下文提示词；
+  它**不**认领 `ctx.compaction`。
 
-### Choose the realm first
+### 先确定挂载平面
 
-`ctx.compaction` is a **per-realm single-slot seam**. The engine must live in the same realm
-the agent resolves `ctx.compaction` from. Mounting it elsewhere creates a second engine; both
-subscribe to the bubbling `agent/pre-step`, and the lower threshold wins — the symptom is
-"compaction became unexpectedly early after installing the plugin".
+`ctx.compaction` 是**按 realm 解析的单槽接缝**。必须挂在 agent 实际解析到的作用域；挂在别处
+不是「覆盖」而是「并存」——两个引擎都订阅冒泡的 `agent/pre-step`，触发点变成两者中较低的那个，
+表现为「装完插件后压缩异常地早」。
 
-| profile | where the agent's engine lives | how to mount |
+| profile | agent 的压缩引擎属于谁 | 怎么挂 |
 |:--|:--|:--|
-| `headless` | the host plane (no agent preset) | the profile's `cordis.patch.yml`, overriding the bundle's engine row |
-| `web` | the **agent preset** (`dsh-web-app` disables the host-plane `compaction-basic`) | a preset declaration override; this repo ships an example bundle |
+| `headless` | 宿主平面（没有 preset） | profile 的 `cordis.patch.yml`，覆盖 bundle 已插入的引擎行 |
+| `web` | **agent preset**（`dsh-web-app` 停用了宿主平面的 `compaction-basic`） | 覆盖 preset 声明；本仓库带一个示例 bundle |
 
-#### Headless (host plane)
+#### headless（宿主平面）
 
-The bundle already inserts `compaction-control` (disabled). Override that row; do **not**
-`insert` a second one:
+bundle 已经插入 `compaction-control`（disabled）。**覆盖这一行**，不要再 `insert` 一份：
 
 ```yaml
 # $DSH_HOME/profiles/<profile>/cordis.patch.yml
@@ -134,221 +120,189 @@ The bundle already inserts `compaction-control` (disabled). Override that row; d
       retain: 0.16
 ```
 
-The loader key is **`disabled`**, not `disable`; the typo is silently dropped by the static
-config and looks like "I disabled it, but it is still enabled".
+loader 认的键是 **`disabled`**，不是 `disable`；写错不会报错，会被静态配置静默丢掉
+（看起来停用了，其实还启用）。
 
-#### Web (agent preset)
+#### web（agent preset）
 
-DSH 0.2.2 presets are `@deepseek-ai/dsh-agent-preset` declarations carried by bundle
-patches. The legacy `$DSH_HOME/.agent-presets/<id>/agent.cordis.yml` directory is no longer
-read. The web agent realm isolates `ctx.compaction`, so a host-plane engine is not seen by
-the agent.
+DSH 0.2.2 的 preset 是 bundle patch 里的 `@deepseek-ai/dsh-agent-preset` 声明。旧目录
+`$DSH_HOME/.agent-presets/<id>/agent.cordis.yml` 已经不再被读取。web 的 agent realm 隔离了
+`ctx.compaction`，宿主平面的引擎它看不到。
 
-This repo ships an example bundle that overrides the shipped `preset-standard` and replaces
-`compaction-basic` inside its `compaction` group with `compaction-control` (keeping
-`command-compact` and `tool-result-pruner`):
+本仓库带一个示例 bundle：覆盖 `preset-standard`，把 `compaction` 组里的 `compaction-basic`
+换成 `compaction-control`，并保留 `command-compact` 与 `tool-result-pruner`：
 
 ```bash
 dsh plugin --profile web add "$PWD"
 dsh plugin --profile web add "$PWD/examples/standard-with-policy"
 ```
 
-Restart the web app and open a new session. The example is a snapshot of the standard preset
-from DSH 0.2.2. If you have customized the standard preset, merge the `compaction` group into
-your own preset declaration instead of installing the example blindly (Creator mode can
-author that override). The file is
-[`examples/standard-with-policy/cordis.patch.yml`](examples/standard-with-policy/cordis.patch.yml);
-its header says the same.
+重启 web app，新开会话验证。示例是 DSH 0.2.2 标准 preset 的快照；如果你改过标准 preset，请把
+`compaction` 组的手动合并进你自己的 preset 声明，而不是盲目安装示例（Creator 模式可以代写
+这个覆盖）。文件在
+[`examples/standard-with-policy/cordis.patch.yml`](examples/standard-with-policy/cordis.patch.yml)，
+头部也写了同样的提醒。
 
-Two silent failure modes are easy to create:
+两种静默坏组合：
 
-- engine on the host plane **and** the stock `compaction-basic` still enabled in the preset
-  → two engines, lower threshold wins;
-- stock engine disabled **without** mounting a replacement → the seam is unclaimed and the
-  session silently stops compacting until the provider rejects it.
+- 宿主平面挂了引擎，preset 里原版 `compaction-basic` 还在 → 两个引擎，阈值低的赢；
+- 原版停用了却没有挂任何替代引擎 → 接缝无人认领，会话静默停止压缩，一路涨到被上游拒绝。
 
-Disable the old engine and enable the new one in the **same composition**, reviewed together.
+「停用旧的」和「启用新的」必须写在同一个组合里，一起 review。
 
-### Live reload scope
+### 热加载范围
 
-The settings panel writes `$DSH_HOME/settings.yaml`. The engine polls that file **and** the
-`compaction-control-settings` row every second, so panel edits and edits to that row apply to
-the next compaction without a restart. The **engine mount row** (`compaction-control`) is
-read at plugin load; editing its `config:` requires a restart.
+设置面板写 `$DSH_HOME/settings.yaml`。引擎每秒轮询该文件**以及** `compaction-control-settings`
+行，所以面板修改和这一行的修改会在下一次压缩生效，不需要重启。**引擎挂载行**
+（`compaction-control`）的 `config:` 在插件加载时读取，改它需要重启。
 
-### Threshold semantics
+### 阈值语义
 
-The official engine's trigger is
+官方引擎的触发点是
 
 ```
 floor(min(W × threshold, W − O − headroomTokens))
 ```
 
-where `W` is the route's declared window, `O` the output reservation, and `headroomTokens`
-defaults to 65,536. `measured` **includes the fixed system prompt and tool catalogue**. On a
-deployment with a large tool set, a threshold of 0.5 can mean "compact after roughly 23K
-tokens of conversation", not "compact when the conversation is half full".
+其中 `W` 是路由声明的窗口，`O` 是输出预留，`headroomTokens` 默认 65,536。`measured`
+**包含固定的系统提示词和工具清单**。在工具很多的部署里，`threshold: 0.5` 可能意味着
+「系统提示词之外再攒约 23K 就压」，不是「对话到一半才压」。
 
-The plugin's `threshold` / `retain` map to the official `thresholdRatio` / `retainRatio`;
-`headroomTokens` and `maxTokens` are per-layer fields. The default is 0.8, the official
-engine's default, so the plugin never triggers earlier than the stock engine unless a
-headroom cap does. The session badge shows `window × threshold` as a quick preview; because
-`W − O − headroomTokens` can be lower, treat that number as an **upper bound** on when
-compaction fires.
+本插件的 `threshold` / `retain` 映射到官方的 `thresholdRatio` / `retainRatio`；
+`headroomTokens` 与 `maxTokens` 是逐层字段。默认 0.8 是官方引擎默认值，除非 headroom 上限
+先到，否则不会比原版更早触发。会话头徽标显示的是 `窗口 × threshold` 的快速预览；因为
+`W − O − headroomTokens` 可能更低，把它当作触发点的**上界**。
 
-## Configuration
+## 配置
 
-The policy can live in the mount row's `config:` or in `$DSH_HOME/settings.yaml` under the
-`compaction-control:` section (the panel edits the latter).
+策略可以写在挂载行的 `config:`，也可以写在 `$DSH_HOME/settings.yaml` 的
+`compaction-control:` 段（面板编辑后者）。
 
 ```yaml
 compaction-control:
-  # global layer
   default:
-    threshold: 0.8            # compact at this fraction of the window
-    retain: 0.16              # keep this tail fraction; must be < threshold
-    summarizationModel: auto  # auto = the session's current route, or "provider/model"
-    summarizationFallback: [] # ordered "provider/model" routes to try after the primary
-    headroomTokens: 65536     # keep this much free below the threshold
-    maxTokens: 8192           # summary length cap
+    threshold: 0.8            # 到达窗口的这个比例就压
+    retain: 0.16              # 原样保留的尾部比例，必须小于 threshold
+    summarizationModel: auto  # auto = 用会话当前路由的模型，或 "provider/model"
+    summarizationFallback: [] # 主摘要失败后按序尝试的 "provider/model" 路由
+    headroomTokens: 65536     # 阈值下方预留的空间
+    maxTokens: 8192           # 摘要长度上限
     compactionRetries: 1
     maxOverflowRetries: 1
 
-  # per-provider override (provider names come from the llm config)
   providers:
     some-provider:
       threshold: 0.5
 
-  # exact (provider, model) override; highest priority
   models:
     - provider: local
       model: model-262k
       threshold: 0.9
 
-  # false = disable automatic compaction (manual /compact still works)
   auto: true
 ```
 
-### Two units per budget field
+### 两种单位
 
-Each budget field has a ratio form and an absolute-token form. Use **one form per layer**:
+每个预算字段都有比例与绝对 token 两种写法，**同一层只能写一种**：
 
-| ratio (of the window) | absolute tokens | meaning |
+| 比例 | 绝对 token | 语义 |
 |:--|:--|:--|
-| `threshold` | `thresholdTokens` | compact when reached |
-| `retain` | `retainTokens` | keep this much recent content |
+| `threshold` | `thresholdTokens` | 到达这个量就压 |
+| `retain` | `retainTokens` | 保留最近这么多内容 |
 
-If both forms appear in the same layer, the token form wins and a `[compaction] WARNING`
-names the shadowed key. The whole section is not rejected, because the panel naturally
-stores a token value next to a ratio baseline and silently ignoring it would be worse.
+同一层两种都写时 token 形式生效，并打一行 `[compaction] WARNING` 点名被遮蔽的键。整段拒绝
+会让面板刚保存的值看起来被静默忽略，所以选择「生效 + 告警」。
 
-### Other policy fields
+### 其它策略字段
 
-Every field below is valid in `default`, a `providers{}` layer, or a `models[]` layer:
+以下字段在 `default`、`providers{}` 层或 `models[]` 层都有效：
 
-| field | default | meaning |
+| 字段 | 默认值 | 含义 |
 |:--|:--|:--|
-| `summarizationModel` | `auto` | `auto` reuses the session's routed model; or an explicit `provider/model` |
-| `summarizationFallback` | `[]` | ordered `provider/model` routes tried when the primary summarizer fails |
-| `headroomTokens` | `65536` (official default) | tokens kept free below the threshold so the summary has room to be smaller |
-| `maxTokens` | official default | cap on the generated summary length |
-| `compactionRetries` | `1` | extra summarization attempts when pressure remains |
-| `maxOverflowRetries` | `1` | retries after a confirmed context-window overflow; `0` disables recovery |
+| `summarizationModel` | `auto` | `auto` 复用语会话当前路由；也可写明确的 `provider/model` |
+| `summarizationFallback` | `[]` | 主摘要失败后按序尝试的 `provider/model` 路由 |
+| `headroomTokens` | `65536`（官方默认） | 阈值下方预留的 token，给摘要留出比被压区间更小的空间 |
+| `maxTokens` | 官方默认 | 生成摘要的长度上限 |
+| `compactionRetries` | `1` | 压力仍高于阈值时的额外摘要尝试 |
+| `maxOverflowRetries` | `1` | 确认上下文溢出后的重试次数；`0` 关闭恢复 |
 
-`auto` is a root-level switch, not a layer field: `false` disables automatic compaction while
-manual `/compact` still works.
+`auto` 是根级开关，不是层字段：设为 `false` 只关闭自动压缩，手动 `/compact` 仍然可用。
 
-**The gap must be large enough.** The summary is a structured summary with a practical lower
-bound (about 3.2K tokens). When `threshold − retain < 8192`, the summary cannot be smaller
-than the content it replaces and the parent engine rejects it. The panel shows this as
-"compactable space" with a warning; small windows may make a small gap unavoidable, so it is
-a warning, not a load failure.
+**空隙要够大。** 摘要是结构化总结，实测下限约 3.2K token；`threshold − retain < 8192` 时摘要
+不可能比被压缩的区间更小，父类会拒绝。面板把「可压缩空间」标红提示；小窗口下小空隙可能无法
+避免，所以是告警而不是加载失败。
 
-## How policy is resolved
+## 策略如何解析
 
-- `models[]` → `providers{}` → `default`, **per field**, resolved by
-  `(provider, model, window)` and cached. A session that switches models picks up the new
-  policy on the next threshold check.
-- The engine reads the route **at the time of the check**, not at session start.
-- A route that declares no context window cannot honor an absolute token budget: the field
-  is deferred and the error names the route when the policy is actually needed.
-- Configuration errors (out-of-range ratio, `retain >= threshold`, unknown field, duplicate
-  `models[]` target, malformed `summarizationModel`) fail at plugin load with a message
-  pointing at the field.
+- `models[]` → `providers{}` → `default`，**逐字段**解析，按 `(provider, model, window)` 缓存。
+  会话中途换模型，下一次门限判断立刻使用新策略。
+- 引擎在门限检查时读取**当时**的路由，而不是会话启动时的路由。
+- 路由没声明窗口时，绝对 token 预算无法兑现：字段进入 `deferred`，真正需要策略的那一步报错
+  并点名路由。
+- 配置错误（比例越界、`retain >= threshold`、未知字段、`models[]` 重复目标、
+  `summarizationModel` 残缺）在插件加载期失败，消息定位到字段。
 
-## Settings panel
+## 设置面板
 
-Models page footer → **Compaction policy** card:
+Models 页脚 → **Compaction policy** 卡片：
 
-- choose the layer: global default or a provider route;
-- edit each budget field; the number's shape is the unit (`0.2` ratio, `200000` tokens);
-  mixed/invalid values are marked and saving is disabled;
-- switch units without leaving both keys in the document (the replaced key is `unset` in the
-  same operation);
-- add/remove a provider override; removal unsets every field in the user layer, including
-  fields the card does not render;
-- the session header badge shows the current trigger point (`ratio · tokens`), the layer
-  that supplied it (`models[]` / `providers{}` / `default` / engine default), the estimated
-  compactable space, and the route that wrote the last summary.
+- 选择层：全局默认或某个供应商路由；
+- 编辑每个预算字段；**数值形状即单位**（`0.2` 比例，`200000` token），非法值标红并禁用保存；
+- 切换单位时在同一批操作里 `unset` 被替换的键，文档不会同时留下两种单位；
+- 新增/移除供应商覆盖；移除会把用户层里的所有字段 unset，包括卡片不渲染的字段；
+- 会话头徽标显示当前触发点（`比例 · token`）、来源层（`models[]` / `providers{}` / `default` /
+  引擎默认）、可压缩空间，以及上一次摘要实际使用的路由。
 
-`models[]` remains hand-edited in `settings.yaml`: the settings writer treats arrays as
-whole-value replacements, so a list editor would rewrite the whole table on every keystroke.
-The badge still reports when a session hit a `models[]` entry.
+`models[]` 仍然只能手写 `settings.yaml`：settings 写入器对数组是整体替换，列表编辑器会在每次
+输入时重写整张表。徽标仍会报告会话命中了 `models[]`。
 
-Non-loopback browsers get DSH's memory-state view (`status: 'unavailable'`,
-`writable: false`); the card says so instead of rendering plugin defaults as if they were
-the deployed policy.
+非环回浏览器拿到的是 DSH 的内存态视图（`status: 'unavailable'`、`writable: false`），卡片会
+明说，而不是把插件默认值当成部署策略。
 
-## Behavior guarantees
+## 行为保证
 
-- **Configuration errors fail at startup, not at the first compaction.** The exception is a
-  policy that needs the route's window; that fails at the step that actually needs it and
-  names the route.
-- **`retain >= threshold` after an override is an error**, not a silent shrink of `retain`.
-- **No semantic hijack.** Region selection, tool pairing and the durable transaction are
-  untouched from the official engine.
-- **Manual compaction is persistent work.** `/compact` is not cancelled by a client
-  disconnect; only the agent's own maintenance signal can cancel it. Stop still works.
-- **Failures are not misreported.** A busy gate is retried once with a bounded wait; if it
-  never releases, the message says the previous activity is still finishing, rather than
-  claiming a lock is held.
-- **Context policy.** The companion says: context management is automatic; you cannot
-  measure your own usage; never stop or shorten work because you believe context is nearly
-  full. The rule is registered only when the profile has a `systemPrompt` service.
+- **配置错误在启动时炸，不在第一次压缩时炸。** 例外是需要路由窗口的绝对预算：在真正需要策略
+  的那一步报错并点名路由。
+- **覆盖导致 `retain >= threshold` 时报错**，不悄悄缩小 retain。
+- **不劫持压缩语义。** 选区、工具配对、事务落盘一行没改。
+- **手动压缩是持久工作。** `/compact` 不因客户端断线而取消；只有 agent 自己的维护信号能取消。
+  Stop 仍然有效。
+- **失败原因不谎报。** 闸门被占时先有界重试一次；始终不释放时明说「上一次活动还在收尾，
+  锁是空的」。
+- **上下文策略。** companion 声明：上下文由 harness 自动管理，模型无法测量自身用量，不得因为
+  自认为快满而停止或缩短工作。profile 没有 `systemPrompt` 服务时不注册。
 
-## Tests
+## 测试
 
 ```bash
 npm test
 ```
 
-198 cases across 13 files, including:
+198 个用例，分布在 13 个文件，包括：
 
-- `manual-compaction.test.js` — gate retry, UI signal abort, real failures, honest messages,
-  and a contract assertion against the installed official package;
-- `context-policy.test.js` — prompt registration and absence without a `systemPrompt` service;
-- `policy.test.js` — three-layer resolution, per-field merge, both units, conversion,
-  warnings, overlay document rules;
-- `engine.test.js` — seam registration, `inject` inheritance, `Config` ownership, per-target
-  switching, window conversion, no-window refusal, profile `models[]` surviving a
-  `settings.yaml` section;
-- `settings-file.test.js` — patch/settings parsing and immediate edits;
-- `fallback.test.js`, `patch-file.test.js`, `settings.test.js`, `summary-prefix.test.js`,
-  `unstated-threshold.test.js` — summarizer fallback, patch entry shapes, settings merge,
-  summary framing and the unstated-threshold warning;
-- `client-policy.test.js` / `client.test.js` — panel calculations, unit switching, provider
-  layers, session badge, illegal value blocking, inline bundle consistency.
+- `manual-compaction.test.js` — 闸门重试、UI 信号中断、真实失败、诚实消息，以及对已安装官方包
+  的契约断言；
+- `context-policy.test.js` — 提示词段落注册与无服务时的降级；
+- `policy.test.js` — 三层解析、逐字段合并、两种单位、换算、告警、overlay 文档规则；
+- `engine.test.js` — 接缝注册、`inject` 继承、`Config` 必须自有、按目标切换、窗口换算、
+  无窗口拒绝、`settings.yaml` 段存在时 profile 的 `models[]` 仍生效；
+- `settings-file.test.js` — 补丁/settings 解析与即时编辑；
+- `fallback.test.js`、`patch-file.test.js`、`settings.test.js`、`summary-prefix.test.js`、
+  `unstated-threshold.test.js` — 摘要回退、补丁 entry 形状、settings 合并、摘要框架与
+  未声明阈值告警；
+- `client-policy.test.js` / `client.test.js` — 面板计算、单位切换、供应商层、会话徽标、
+  非法值拦截、内联 bundle 一致性。
 
-## Compatibility and migration
+## 兼容与迁移
 
-- DSH `0.2.2-rc.x` (`engines.dsh`: `>=0.2.2-0 <0.3.0-0`), Node.js 20+.
-- **Renamed from `dsh-compaction-control` in 0.5.0.** Entry ids are unchanged:
-  `compaction-control` (engine), `compaction-control-settings` (companion), and the
-  `compaction-control:` settings namespace. Update the `name:` fields in your profile/preset
-  to `@magic6/dsh-compaction-policy-engine` (and `.../engine` for the engine row).
-- The engine is still a subclass of the official `BasicCompactionEngine`; no `node_modules`
-  patch is required.
+- DSH `0.2.2-rc.x`（`engines.dsh`：`>=0.2.2-0 <0.3.0-0`）、Node.js 20+。
+- **0.5.0 从 `dsh-compaction-control` 改名。** entry id 保持不变：
+  `compaction-control`（引擎）、`compaction-control-settings`（companion），以及
+  `compaction-control:` 设置命名空间。把 profile/preset 里的 `name:` 改成
+  `@magic6/dsh-compaction-policy-engine`（引擎行加 `/engine`）即可。
+- 仍然是官方 `BasicCompactionEngine` 的子类，不需要改 `node_modules`。
 
-## License
+## 许可
 
-MIT. See [LICENSE](LICENSE).
+MIT，见 [LICENSE](LICENSE)。
