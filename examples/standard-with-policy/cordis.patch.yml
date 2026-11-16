@@ -79,7 +79,7 @@
         config:
           # The policy engine replaces the stock compaction-basic in this realm.
           - id: compaction-control
-            name: 'dsh-compaction-policy-engine/engine'
+            name: '@magic6/dsh-compaction-policy-engine/engine'
             config:
               default:
                 threshold: 0.8

@@ -345,7 +345,7 @@ npm test
 - **Renamed from `dsh-compaction-control` in 0.5.0.** Entry ids are unchanged:
   `compaction-control` (engine), `compaction-control-settings` (companion), and the
   `compaction-control:` settings namespace. Update the `name:` fields in your profile/preset
-  to `dsh-compaction-policy-engine` (and `.../engine` for the engine row).
+  to `@magic6/dsh-compaction-policy-engine` (and `.../engine` for the engine row).
 - The engine is still a subclass of the official `BasicCompactionEngine`; no `node_modules`
   patch is required.
 

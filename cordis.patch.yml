@@ -49,12 +49,12 @@
 # `[compact-debug]` lines per step with the same `measured` were the signature.)
 - insert:
     - id: compaction-control
-      name: 'dsh-compaction-policy-engine/engine'
+      name: '@magic6/dsh-compaction-policy-engine/engine'
       disabled: true
 
 - insert:
     - id: compaction-control-settings
-      name: 'dsh-compaction-policy-engine'
+      name: '@magic6/dsh-compaction-policy-engine'
       config:
         default:
           threshold: 0.8

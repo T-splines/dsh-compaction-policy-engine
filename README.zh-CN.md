@@ -300,7 +300,7 @@ npm test
 - **0.5.0 从 `dsh-compaction-control` 改名。** entry id 保持不变：
   `compaction-control`（引擎）、`compaction-control-settings`（companion），以及
   `compaction-control:` 设置命名空间。把 profile/preset 里的 `name:` 改成
-  `dsh-compaction-policy-engine`（引擎行加 `/engine`）即可。
+  `@magic6/dsh-compaction-policy-engine`（引擎行加 `/engine`）即可。
 - 仍然是官方 `BasicCompactionEngine` 的子类，不需要改 `node_modules`。
 
 ## 许可
