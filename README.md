@@ -1,6 +1,6 @@
 # dsh-compaction-policy-engine
 
-**English** | [简体中文](README.zh-CN.md)
+**English** | [简体中文](https://github.com/T-splines/dsh-compaction-policy-engine/blob/main/README.zh-CN.md)
 
 **Per-model context compaction policy for DeepSeek Harness — three-layer thresholds, live reload and summarization-model selection, on top of the official compaction engine.**
 
@@ -79,6 +79,17 @@ A model can override `threshold` while still inheriting `retain`, `maxTokens`,
 ## Install and mount
 
 Requirements: DSH `0.2.2-rc.x`, Node.js 20+.
+
+### From npm
+
+```bash
+dsh plugin --profile web add dsh-compaction-policy-engine
+```
+
+The npm package includes `examples/standard-with-policy` for reference; the preset override
+rules below still apply. The `$PWD` commands in the web section assume a source checkout.
+
+### From source
 
 ```bash
 git clone https://github.com/T-splines/dsh-compaction-policy-engine.git

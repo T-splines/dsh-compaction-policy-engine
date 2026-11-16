@@ -1,6 +1,6 @@
 # dsh-compaction-policy-engine
 
-[English](README.md) | **简体中文**
+[English](https://github.com/T-splines/dsh-compaction-policy-engine/blob/main/README.md) | **简体中文**
 
 **DeepSeek Harness 的按模型上下文压缩策略——三层阈值、热加载与摘要模型选择，构建在官方压缩引擎之上。**
 
@@ -68,6 +68,17 @@ models[]  →  providers{}  →  default
 ## 安装与挂载
 
 要求：DSH `0.2.2-rc.x`、Node.js 20+。
+
+### 从 npm 安装
+
+```bash
+dsh plugin --profile web add dsh-compaction-policy-engine
+```
+
+npm 包里包含 `examples/standard-with-policy` 供参考；下面的 preset 覆盖规则仍然适用。
+web 小节里的 `$PWD` 命令假设使用源码检出。
+
+### 从源码安装
 
 ```bash
 git clone https://github.com/T-splines/dsh-compaction-policy-engine.git
