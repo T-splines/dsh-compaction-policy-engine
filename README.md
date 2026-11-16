@@ -83,7 +83,7 @@ Requirements: DSH `0.2.2-rc.x`, Node.js 20+.
 ### From npm
 
 ```bash
-dsh plugin --profile web add dsh-compaction-policy-engine
+dsh plugin --profile web add @magic6/dsh-compaction-policy-engine
 ```
 
 The npm package includes `examples/standard-with-policy` for reference; the preset override

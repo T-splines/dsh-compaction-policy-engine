@@ -72,7 +72,7 @@ models[]  →  providers{}  →  default
 ### 从 npm 安装
 
 ```bash
-dsh plugin --profile web add dsh-compaction-policy-engine
+dsh plugin --profile web add @magic6/dsh-compaction-policy-engine
 ```
 
 npm 包里包含 `examples/standard-with-policy` 供参考；下面的 preset 覆盖规则仍然适用。
