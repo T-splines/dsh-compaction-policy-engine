@@ -1,6 +1,6 @@
 {
   "name": "dsh-compaction-policy-engine",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Layered, live-reloading context compaction policy for DeepSeek Harness: provider-level rules, field-by-field inheritance, ratio/token units and a settings panel on top of the official engine.",
   "type": "module",
   "main": "lib/companion.js",
