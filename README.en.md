@@ -78,7 +78,7 @@ A model can override `threshold` while still inheriting `retain`, `maxTokens`,
 
 ## Install and mount
 
-Requirements: DSH `0.2.2-rc.x`, Node.js 20+.
+Requirements: DSH `0.2.1-rc.x` / `0.2.2-rc.x`, Node.js 20+.
 
 ### From npm
 
@@ -341,7 +341,7 @@ npm test
 
 ## Compatibility and migration
 
-- DSH `0.2.2-rc.x` (`engines.dsh`: `>=0.2.2-0 <0.3.0-0`), Node.js 20+.
+- DSH `0.2.1-rc.x` / `0.2.2-rc.x` (`engines.dsh`: `>=0.2.1-0 <0.3.0-0`), Node.js 20+.
 - **Renamed from `dsh-compaction-control` in 0.5.0.** Entry ids are unchanged:
   `compaction-control` (engine), `compaction-control-settings` (companion), and the
   `compaction-control:` settings namespace. Update the `name:` fields in your profile/preset

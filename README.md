@@ -67,7 +67,7 @@ models[]  →  providers{}  →  default
 
 ## 安装与挂载
 
-要求：DSH `0.2.2-rc.x`、Node.js 20+。
+要求：DSH `0.2.1-rc.x` / `0.2.2-rc.x`、Node.js 20+。
 
 ### 从 npm 安装
 
@@ -296,7 +296,7 @@ npm test
 
 ## 兼容与迁移
 
-- DSH `0.2.2-rc.x`（`engines.dsh`：`>=0.2.2-0 <0.3.0-0`）、Node.js 20+。
+- DSH `0.2.1-rc.x` / `0.2.2-rc.x`（`engines.dsh`：`>=0.2.1-0 <0.3.0-0`）、Node.js 20+。
 - **0.5.0 从 `dsh-compaction-control` 改名。** entry id 保持不变：
   `compaction-control`（引擎）、`compaction-control-settings`（companion），以及
   `compaction-control:` 设置命名空间。把 profile/preset 里的 `name:` 改成
