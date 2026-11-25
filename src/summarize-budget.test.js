@@ -25,7 +25,7 @@ import {
 	messageTokens,
 	requestBudget,
 	shrinkToFit,
-} from '../lib/summarize-budget.js';
+} from './summarize-budget.js';
 
 /** A text message of roughly `tokens * 4` characters. */
 function textMessage(role, tokens) {
