@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.6] - 2026-11-25
+
+### Fixed
+
+- Two tests asserted POSIX path literals against `path.join` output and failed on
+  every Windows run (`\tmp\cc-home-probe\…` never starts with `/tmp/cc-home-probe/`).
+  The product code was correct; the assertions were the platform-specific part.
+  They now build the expected path with `join`/`sep`, and the suite passes on
+  Windows for the first time (198/198). CI is `ubuntu-latest` only, which is why
+  this went unnoticed while the plugin was being used on Windows.
+
 ## [0.5.5] - 2026-11-22
 
 ### Fixed
