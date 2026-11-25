@@ -126,3 +126,34 @@ region-only 输入（由 gate 限定，天然有界）。`780e74c`。
   体积本来就不是一回事。
 - 用户凭直觉说"21.7 万不该超窗"是对的。**当数据与结论矛盾时，先怀疑自己的模型**
   （我当时假设"会话体积=请求体积"），不要急着给矛盾找解释。
+
+---
+
+## [2026-11-26] npm publish 成功 ≠ 包可用：`latest` 标签可能没跟着动
+
+**问题**：`npm publish` 输出 `+ @magic6/dsh-compaction-policy-engine@0.5.11`，
+但 Win11 上 `dsh plugin add @magic6/dsh-compaction-policy-engine@0.5.11` 报
+`The latest release is "0.5.10"`，`npm view ... versions` 里也看不到 0.5.11。
+
+**根因**：第一次 publish 因为网络/超时被中断，版本其实已经**暂存**到 registry
+（`time` 元数据里有 `0.5.11: ...16:43:54.849Z`），但 `dist-tags.latest` 没更新。
+重试 publish 时 registry 回 `E409 Cannot publish over previously staged version` ——
+这个错误很误导，它说的是"已暂存"，不是"没发布"。
+
+**判断依据**：不要看 publish 的 stdout，看两处：
+```bash
+curl -s -H "Accept: application/vnd.npm.install-v1+json" \
+  https://registry.npmjs.org/@magic6%2fdsh-compaction-policy-engine | jq '.versions, .["dist-tags"]'
+```
+`versions` 里有 → 包已发布；`dist-tags.latest` 没指过去 → 安装时会回退到旧版。
+
+**解决**：`npm dist-tag add <pkg>@<version> latest`。
+
+**教训**：
+- **`npm publish` 的 `+` 行不代表完成**，它只是本地 staging 成功的回显。装不上就先查
+  registry 的 `versions` 和 `dist-tags`，别急着重发（重发会撞 E409）。
+- E409 "Cannot publish over previously staged version" 的正确解读是
+  **该版本已存在，去修 dist-tag，不要换版本号**。我一开始换到 0.5.12，
+  等于白白多了一个空版本号。
+- 端到端验证要用**分发产物**（`dsh plugin add` 从 registry 装），不能用本地目录装 ——
+  本地装测不到这类发布问题。
