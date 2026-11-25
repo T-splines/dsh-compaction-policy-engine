@@ -75,10 +75,21 @@ prepare() {
     model: tiny
 # ctx.compaction 是单槽位：装了本引擎就必须关掉官方那个，否则同一步跑两个引擎，
 # 门槛低的那个赢。
-- id: compaction-basic
-  disabled: true
+# ⚠ 这里**不写** '- id: compaction-control / disabled: false'（2026-11-26 移除）。
+#
+# 一度写着它，理由是「引擎出厂 disabled，e2e 得打开才能测」。代价是这套测试再也
+# 测不出「bundle 的出厂状态到底能不能用」——而这正是线上出的事：
+#
+#   * bundle 出厂 'compaction-control: disabled: true'
+#   * 'dsh-web-app' 把宿主平面的 'compaction-basic' 也设成 disabled
+#   * 于是两个引擎都没跑，而这个 'disabled: false' 一直在替 bundle 打掩护
+#
+# 现在只覆盖 'config:'（门槛用绝对 token 数，为了让十几秒的对话能跨过去）。disabled
+# 保持 bundle 出厂值不动 —— 插件必须靠自己就能接管，这正是被测的性质。
+#
+# 副作用是 fixture 依赖 bundle 主动 disable 掉 'compaction-basic'：两个引擎同时订阅
+# 冒泡的 agent/pre-step 会取较低阈值，e2e 会因此看到提前触发。
 - id: compaction-control
-  disabled: false
   config:
     default:
       thresholdTokens: $THRESHOLD_TOKENS
@@ -138,9 +149,12 @@ run_fired() {
 	[ -n "$sid" ] || { bad "$name"; printf '      拿不到 session id\n'; stop_server; return; }
 
 	local saw_wait=0 saw_fire=0 fired_line="" measured_after=""
-	local i out
+	# `engine up` 是每进程一行、无条件打到 stderr 的（引擎自己保证），所以只要我们的
+	# 引擎挂上了，它在**任何**一轮的输出里都会出现。累积起来断言即可。
+	local all_out="" out i
 	for i in 1 2 3 4 5 6; do
 		out="$(turn "$sid" "$FILLER")"
+		all_out+="$out"
 		grep -q 'gate=wait' <<<"$out" && saw_wait=1
 		if grep -q 'gate=FIRE' <<<"$out"; then
 			saw_fire=1
@@ -152,6 +166,26 @@ run_fired() {
 			measured_after="$(grep -oE 'measured=[0-9]+' <<<"$out" | head -1 | cut -d= -f2)"
 		fi
 	done
+
+	# ⚠ 这条断言是 2026-11-26 事故的直接产物，必须放在最前面。
+	#
+	# 上面所有判据（gate=wait -> gate=FIRE、thresholdTokens 相等、压缩后变小）
+	# 官方 `compaction-basic` **自己也能满足**：它同样按窗口比例触发、同样把上下文
+	# 压小。于是插件完全没接管时，这套 e2e 依然全绿 —— Win11 上就是这样：装完插件
+	# 引擎行 `disabled: true`，官方引擎停了（dsh-web-app 停的），两边都没跑，会话
+	# 一路涨到 158k 后被上游连拒四次，而本地测试一次都没红过。
+	#
+	# 判据只有一个不会说谎的东西：引擎自己启动时打印的那行 `engine up`，它带
+	# `fiber=` 和 `source=`。没有这行 = 我们的引擎根本没挂载，后面的一切都没有意义。
+	#
+	# 同时必须确认官方引擎**不在**跑：两个引擎同时订阅冒泡的 `agent/pre-step` 时
+	# 触发点取两者中较低的那个，表现为「装完插件后压缩异常地早」。
+	grep -q 'compaction\] engine up:' <<<"${all_out:-}" \
+		|| problems+=("我们的引擎从未启动（没有 engine up 行）—— 插件没有接管压缩")
+	if grep -q 'compaction\] engine up:' <<<"${all_out:-}"; then
+		grep -q 'engine up: fiber=.*source=' <<<"${all_out:-}" \
+			|| problems+=("engine up 行里没有 fiber/source，无法判断是哪一层挂的")
+	fi
 
 	[ "$saw_wait" = "1" ] || problems+=("从没出现过 gate=wait —— 门槛跳变，测的不是压力触发")
 	[ "$saw_fire" = "1" ] || problems+=("六轮都没跨过门槛，压缩没触发")
@@ -184,8 +218,8 @@ run_unstated() {
 import re, sys
 path = sys.argv[1]
 text = open(path).read()
-# 去掉 compaction-control 的 config 块（保留 disabled: false）
-text = re.sub(r"(- id: compaction-control\n  disabled: false\n)  config:\n(?:    .*\n)+", r"\1", text)
+# 去掉 compaction-control 的 config 块（这一行本身不带 disabled，见 prepare() 的注释）
+text = re.sub(r"(- id: compaction-control\n)  config:\n(?:    .*\n)+", r"\1", text)
 # 去掉 settings 那一整块 insert
 text = re.sub(r"- insert:\n    - id: compaction-control-settings\n(?:      .*\n)+", "", text)
 open(path, "w").write(text)
