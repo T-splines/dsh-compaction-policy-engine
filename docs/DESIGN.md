@@ -85,9 +85,19 @@ the disable and the mount together.
 The loader key is `disabled`, not `disable`. The typo is dropped by the schema and the row
 stays enabled.
 
-The bundle deliberately ships the engine row `disabled`: turning it on without also disabling
-the stock engine would create a second engine, and disabling the stock engine without a
-replacement would leave no engine. Superseding the stock engine is a deployment decision.
+**`ctx.compaction` is a single-slot service, not an agreement between engines.** A second
+engine in the same context does not lose a threshold race — it throws
+`service "compaction" has been registered at <BasicCompactionEngine>` while constructing and
+never mounts (the host prints only `dsh: warning: 1 entry did not activate`). "Keep the stock
+engine as a late backstop" is therefore not available.
+
+Because of that, the bundle does both halves of the swap in one place: it sets
+`compaction-basic` to `disabled: true` and enables the engine row. Uninstalling removes both,
+so the stock engine comes back — a profile can never end up with no compaction at all.
+
+≤0.5.9 shipped the engine row `disabled`, on the theory that superseding the stock engine was
+a deployment decision. That assumed the stock engine was running; on `dsh-web-app` presets it
+is not, so both engines were off and the seam was unclaimed. See `exp.md` (2026-11-26).
 
 The companion row is host-plane and always enabled because the browser bundle is discovered
 from enabled loader entries; the engine row lives in a preset and is invisible to that scan.
