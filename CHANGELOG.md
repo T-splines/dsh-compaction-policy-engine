@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.7] - 2026-11-25
+
+### Fixed
+
+- One more Windows-only test failure, found by the `windows-latest` job added in
+  this release: the watcher test built its temp path as
+  `process.env.TMPDIR ?? '/tmp'`. `TMPDIR` is unset on Windows, and the fallback
+  `/tmp/x.yaml` is drive-relative there, so it resolved to `D:\tmp\x.yaml` and
+  the test died with `ENOENT`. Now uses `os.tmpdir()`. This one reached users:
+  the suite is what a Windows contributor runs before sending a patch.
+
 ## [0.5.6] - 2026-11-25
 
 ### Fixed

@@ -10,7 +10,9 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { parseSettingsDocument, readSection, settingsFilePath, watchSettingsFile } from '../lib/settings-file.js';
 
@@ -79,9 +81,12 @@ test('the reader parses this machine\'s real settings document', () => {
 });
 
 test('the watcher reports the section, then follows an external edit', async () => {
-	const file = `${process.env.TMPDIR ?? '/tmp'}/cc-settings-${process.pid}.yaml`;
+	// `os.tmpdir()`, not `process.env.TMPDIR ?? '/tmp'`: TMPDIR is unset on
+	// Windows, so the fallback produced the drive-relative path `/tmp/...` →
+	// `D:\tmp\...`, which does not exist. That failed the windows-latest job
+	// while every POSIX run passed.
+	const file = join(tmpdir(), `cc-settings-${process.pid}.yaml`);
 	const writes = [];
-	const { writeFileSync } = await import('node:fs');
 	writeFileSync(file, 'compaction-control:\n  default:\n    threshold: 0.2\n    retain: 0.08\n');
 	const stop = watchSettingsFile({
 		file,
@@ -126,7 +131,7 @@ test('the watcher reports the section, then follows an external edit', async () 
 test('a missing file falls back to the composition section instead of failing', () => {
 	const writes = [];
 	const stop = watchSettingsFile({
-		file: `${process.env.TMPDIR ?? '/tmp'}/cc-absent-${process.pid}.yaml`,
+		file: join(tmpdir(), `cc-absent-${process.pid}.yaml`),
 		fallbackSection: { default: { threshold: 0.8, retain: 0.16 } },
 		onSection: (section, origin) => writes.push({ section, origin }),
 		onError: () => {},
