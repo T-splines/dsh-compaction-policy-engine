@@ -6,10 +6,17 @@
 # official implementation — only the policy (three-layer threshold + summarization
 # model) becomes configurable here.
 #
-# ── Mounting this plugin means "take over compaction" (2026-11-26) ────────────
+# ── Mounting this plugin swaps the engine (2026-11-26) ────────────────────────
 #
-# `ctx.compaction` is a single-slot seam, so exactly one engine may hold it. This
-# bundle therefore does BOTH halves of the swap in one place:
+# `ctx.compaction` is a SINGLE-SLOT service, not an agreement between engines:
+#
+#     super(ctx, "compaction")   // -> 'service "compaction" has been registered
+#                                //     at <BasicCompactionEngine>'
+#
+# A second engine in the same context does not lose a threshold race — it throws
+# during construction and never mounts at all. So "leave the stock engine on as a
+# late backstop" is not available: the bundle must disable it, or the policy engine
+# cannot start. This file therefore does both halves in one place:
 #
 #   - disables the stock `compaction-basic` row, and
 #   - enables the policy engine.
@@ -19,39 +26,31 @@
 # decision" — but that theory silently assumed the stock engine was *running*.
 # On a preset-based host (`dsh-web-app`: `web` and `desktop` profiles) the host
 # plane's `compaction-basic` is disabled by the app itself, so a bundle that also
-# leaves its own engine disabled yields **no compaction at all**: the settings
-# card renders, the threshold reads back, and nothing ever fires. That is exactly
-# how a Win11 session grew past 158k tokens and then could not compact — four
-# forced compactions in a row, every one rejected upstream.
+# left its own engine disabled yielded **no compaction at all**: the settings card
+# rendered, the threshold read back, and nothing ever fired. That is how a Win11
+# session grew past 158k tokens and then could not compact — four forced
+# compactions in a row, every one rejected upstream, and every local test green.
 #
 # Unmounting the plugin reverses both halves automatically: these rows and the
 # `compaction-basic` override disappear together, restoring the stock engine.
 #
 # ── Which realm the engine lands in ──────────────────────────────────────────
 #
-# `isolate: compaction: true` in the agent presets means a preset-based host
-# resolves `ctx.compaction` inside each preset realm; the host plane's engine is
-# invisible to it. So on `web`/`desktop` this row reaches the **host plane only**,
-# which is the correct place for it to do no harm (the preset's own
-# `compaction-basic` still owns the seam inside the realm), and the policy takes
-# effect when the preset mounts a `compaction-control` row — see
-# `examples/standard-with-policy/`. On `headless` there is no preset, the host
-# plane *is* the realm, and this row is the engine.
-#
-# The engine never mounts twice on one seam: a host-plane engine runs *beside* a
-# preset one on the same bubbling `agent/pre-step`, and the lower threshold wins.
-# Overriding `compaction-basic` here is the host-plane half of that rule; the
-# preset half is the preset's own row, which `examples/` replaces rather than adds
-# beside.
+# `isolate: compaction: true` in the agent presets gives each preset realm its own
+# `compaction` slot, so a preset host keeps a stock `compaction-basic` inside the
+# realm alongside this host-plane engine — two engines, two contexts, no conflict.
+# The host-plane one (this row) serves `headless` and any agent that resolves the
+# host plane; a preset that wants the policy inside its realm replaces its own
+# `compaction` group, see `examples/standard-with-policy/`.
 #
 # Thresholds are ratios, never absolute token counts: a model's advertised window
 # is not stable, and a model that declares no window cannot honor a token budget.
 #
 # The companion row is a **separate, enabled, host-plane** row because the browser
 # bundle is discovered from enabled loader entries (`dsh-client-modules` walks
-# `ctx.loader.entries()` and skips disabled or fiberless ones) — the engine
-# normally lives inside an agent preset on preset hosts, where that scan cannot
-# see it. It deliberately does NOT claim `ctx.compaction`.
+# `ctx.loader.entries()` and skips disabled or fiberless ones) — the engine can
+# live inside an agent preset, where that scan cannot see it. It deliberately does
+# NOT claim `ctx.compaction`.
 #
 # `name` is the **bare package name**, which resolves to `lib/companion.js`. That
 # split is load-bearing: the loader mounts a row's `exports.default` and reads no
@@ -59,6 +58,7 @@
 # `export:` key, which was silently dropped — putting a second engine on the host
 # plane at the shipped default and capping every raised threshold. Two
 # `[compact-debug]` lines per step with the same `measured` were the signature.)
+
 - id: compaction-basic
   disabled: true
 

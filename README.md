@@ -86,38 +86,55 @@ cd dsh-compaction-policy-engine
 dsh plugin --profile web add "$PWD"
 ```
 
-包本身是 bundle，会挂两行：
+包本身是 bundle，**装上即接管压缩**：
 
-- **引擎行**（`compaction-control`），**默认 disabled**；
-- **companion 行**（`compaction-control-settings`），始终启用，负责设置卡片与上下文提示词；
+- 把官方 `compaction-basic` 行设为 `disabled: true`；
+- **启用**引擎行（`compaction-control`）；
+- companion 行（`compaction-control-settings`）始终启用，负责设置卡片与上下文提示词；
   它**不**认领 `ctx.compaction`。
+
+卸载插件时这三件事一起消失：`compaction-basic` 的覆盖随 bundle 走，官方引擎自动恢复。
+**不会出现「卸掉插件后什么都不压缩」的状态**，这一点有 e2e 守着（见 `e2e/` 的 `fired` 场景）。
+
+### 为什么必须自己关官方引擎
+
+`ctx.compaction` 是**单槽服务**，不是两个引擎之间的约定：
+
+```js
+super(ctx, "compaction")   // 第二个 -> 'service "compaction" has been registered at …'
+```
+
+同一 context 里放第二个引擎**不会**退化成「低阈值赢」，而是在构造时抛错、那一行根本不挂载。
+所以「留着官方引擎当兜底」不成立——要么关掉它，要么本插件无法启动。
+
+> **上一版（≤0.5.9）出厂把引擎设成 `disabled: true`**，理由是「替换官方引擎属于部署决策」。
+> 那条推理默认官方引擎**正在运行**；而 `dsh-web-app`（`web` / `desktop` profile）本来就把宿主
+> 平面的 `compaction-basic` 停了。两边都没开 → 设置卡片正常渲染、阈值读得回来、压缩一次都不触发。
+> Win11 上一个会话就是这样涨到 158k token，随后四次压缩全被上游拒绝。见 CHANGELOG 0.5.10。
 
 ### 先确定挂载平面
 
-`ctx.compaction` 是**按 realm 解析的单槽接缝**。必须挂在 agent 实际解析到的作用域；挂在别处
-不是「覆盖」而是「并存」——两个引擎都订阅冒泡的 `agent/pre-step`，触发点变成两者中较低的那个，
-表现为「装完插件后压缩异常地早」。
+`ctx.compaction` 是**按 realm 解析的单槽服务**。`isolate: compaction: true` 让每个 preset realm
+各有一份，所以 preset 宿主里会同时存在「宿主平面一个 + preset 内一个」——两个 context，不冲突。
+宿主平面的引擎服务 `headless` 与解析到宿主平面的 agent；想让策略进到某个 preset 内部，
+替换它自己的 `compaction` 组（见下）。
 
-| profile | agent 的压缩引擎属于谁 | 怎么挂 |
+| profile | agent 的压缩引擎属于谁 | 需要做什么 |
 |:--|:--|:--|
-| `headless` | 宿主平面（没有 preset） | profile 的 `cordis.patch.yml`，覆盖 bundle 已插入的引擎行 |
-| `web` | **agent preset**（`dsh-web-app` 停用了宿主平面的 `compaction-basic`） | 覆盖 preset 声明；本仓库带一个示例 bundle |
+| `headless` | 宿主平面（没有 preset） | 无。bundle 已接管 |
+| `web` / `desktop` | **agent preset**（宿主平面的 `compaction-basic` 由 `dsh-web-app` 停用） | 宿主平面已接管；要让 preset 内部也用策略，需覆盖 preset 声明 |
 
 #### headless（宿主平面）
 
-bundle 已经插入 `compaction-control`（disabled）。**覆盖这一行**，不要再 `insert` 一份：
+无。装上就生效，bundle 已经写好了那两行。要改门槛就改 `config:`：
 
 ```yaml
 # $DSH_HOME/profiles/<profile>/cordis.patch.yml
-- id: compaction-basic
-  disabled: true
-
 - id: compaction-control
-  disabled: false
   config:
     default:
-      threshold: 0.8
-      retain: 0.16
+      threshold: 0.42
+      retain: 0.08
 ```
 
 loader 认的键是 **`disabled`**，不是 `disable`；写错不会报错，会被静态配置静默丢掉
@@ -145,8 +162,10 @@ dsh plugin --profile web add "$PWD/examples/standard-with-policy"
 
 两种静默坏组合：
 
-- 宿主平面挂了引擎，preset 里原版 `compaction-basic` 还在 → 两个引擎，阈值低的赢；
+- 宿主平面挂了引擎，同一 realm 里原版 `compaction-basic` 还在 → 第二个引擎注册失败，
+  只有一行 warning（`dsh: warning: 1 entry did not activate`），策略静默失效；
 - 原版停用了却没有挂任何替代引擎 → 接缝无人认领，会话静默停止压缩，一路涨到被上游拒绝。
+  **这正是 0.5.9 及更早版本在 `web` / `desktop` 上的默认行为**，已由 bundle 自身修掉。
 
 「停用旧的」和「启用新的」必须写在同一个组合里，一起 review。
 

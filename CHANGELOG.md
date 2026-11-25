@@ -4,6 +4,73 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.10] - 2026-11-26
+
+### Fixed — installing the plugin now actually takes over compaction
+
+The bundle shipped its engine row `disabled: true`, on the theory that "superseding the
+stock engine is a deployment decision". That reasoning silently assumed the stock engine
+was *running*. On a preset-based host it is not: `dsh-web-app` — which backs both the
+`web` and `desktop` profiles — disables the host-plane `compaction-basic` itself. So with
+this plugin installed there were **two disabled engines and no owner of `ctx.compaction`**:
+
+- the settings card rendered and returned the configured threshold;
+- `engine up` printed nothing, because the engine never mounted;
+- nothing compacted, ever.
+
+Observed on a Win11 `desktop` profile: a session grew to 158,118 tokens and then could
+not compact at all. Four forced compactions ran (two in turn 27, one in turn 28, one
+manual `/compact`) and every one came back `context_length_exceeded` from the gateway,
+because the summary request has to carry the same oversized history that triggered it.
+The session was unrecoverable — retrying sent the same request, and compaction could not
+shrink it.
+
+The fix is for the bundle to do both halves of the swap in one place:
+
+```yaml
+- id: compaction-basic
+  disabled: true
+
+- insert:
+    - id: compaction-control
+      name: '@magic6/dsh-compaction-policy-engine/engine'
+```
+
+Uninstalling removes both, so the stock engine comes back automatically. The plugin can no
+longer leave a profile with no compaction at all.
+
+`ctx.compaction` is a **single-slot service**, not an agreement between engines: a second
+engine in the same context throws `service "compaction" has been registered at
+<BasicCompactionEngine>` during construction and never mounts (the host only prints
+`dsh: warning: 1 entry did not activate`). That is why "leave the stock engine enabled as
+a late backstop" is not an option — verified by hand on the same Win11 host.
+
+### Fixed — a test fixture that hid the bug
+
+`e2e/run.sh` wrote `- id: compaction-control / disabled: false` into the fixture profile.
+That was intended to mean "the engine has to be on for the test to run", but it also meant
+the suite could never observe the bundle's own default. Every scenario stayed green while
+the shipped bundle was unusable.
+
+The fixture now overrides only `config:`, leaving `disabled` at whatever the bundle ships.
+`fired` additionally asserts that the engine printed its own `[compaction] engine up:` line
+before it judges anything about thresholds — the precondition that the old suite silently
+assumed.
+
+Regression check with the corrected fixture (same suite, same fake provider):
+
+| version | result |
+|:--|:--|
+| `0.5.9` (buggy) | **0 passed, 1 failed** — "our engine never started", plus "no compaction fired" |
+| this release | 2 passed, 0 failed |
+
+### Changed — README
+
+The mounting section now states that installing the plugin *is* the takeover, that the
+stock row must be disabled because the seam is single-slot, and that uninstalling restores
+it. The two silent-bad-combination warnings keep their original text but now name which
+one this release fixed.
+
 ## [0.5.9] - 2026-11-25
 
 ### Fixed — three bugs that only a real host could expose
