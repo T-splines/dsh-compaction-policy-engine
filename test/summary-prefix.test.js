@@ -67,7 +67,7 @@ function fakeSession(options = {}) {
 }
 
 /** An engine whose llm seam records each request and answers with one text block. */
-function makeEngine(session) {
+function makeEngine(session, control = {}) {
 	const calls = [];
 	const ctx = new Context();
 	ctx.tokenMeter = { measure: () => ({ totalTokens: 0, nodes: [] }) };
@@ -85,7 +85,8 @@ function makeEngine(session) {
 		}),
 	};
 	ctx.llm = llm;
-	const engine = new CompactionControlEngine(ctx, {});
+	// 走真实构造器：`resolveConfig` 会校验并规范化每一层，直接改字段会绕过它。
+	const engine = new CompactionControlEngine(ctx, control);
 	return { engine, calls, ctx, llm, agent: { session, options: {} } };
 }
 
@@ -183,3 +184,62 @@ test('a surface whose nodes all project to null keeps the region-only input', as
 
 	assert.deepEqual(conversation(calls[0]), ['SYSTEM', 'U1', 'A1'], 'a null projection is not a truncation');
 });
+
+//#region 可选的全量重放（replayFullConversation）
+
+/**
+ * The full replay is kept as an opt-in for one real case: a local inference
+ * engine that resumes only from an exact token-prefix of the new prompt. For
+ * that engine a region-only replay re-reads the whole region (measured 403,413
+ * tokens / 311 s), while a full replay is an exact extension of the live state.
+ *
+ * It must stay opt-in because it fails in the opposite direction: a session
+ * large enough to need compaction may not fit its own replay in the window.
+ */
+
+/** A layer that turns the replay on for the target under test. */
+const REPLAY_ON = { models: [{ provider: TARGET.provider, model: TARGET.model, replayFullConversation: true }] };
+
+test('replayFullConversation: false (the default) keeps the region-only input', async () => {
+	const { engine, calls, agent } = makeEngine(fakeSession());
+	await engine.summarize(REGION_INPUT, agent, undefined).catch(() => {});
+
+	assert.deepEqual(conversation(calls[0]), ['SYSTEM', 'U1', 'A1'], '★ default is region-only');
+});
+
+test('replayFullConversation: true replays the whole surfaced conversation', async () => {
+	const { engine, calls, agent } = makeEngine(fakeSession(), REPLAY_ON);
+	await engine.summarize(REGION_INPUT, agent, undefined).catch(() => {});
+
+	assert.deepEqual(
+		conversation(calls[0]),
+		['SYSTEM', 'U1', 'A1', 'U2-TAIL', 'A2-TAIL'],
+		'★ opted in: every surface node is replayed so a prefix-cache engine can resume',
+	);
+	assert.match(instruction(calls[0]), /compaction engine/, 'the instruction is still the final message');
+});
+
+test('replayFullConversation never mutates the caller\'s input', async () => {
+	const input = { messages: [PROJECTED.get(0)], tools: TOOLS };
+	const original = structuredClone(input);
+	const { engine, agent } = makeEngine(fakeSession(), REPLAY_ON);
+	await engine.summarize(input, agent, undefined).catch(() => {});
+
+	assert.deepEqual(input, original, 'the parent still owns its input object');
+});
+
+test('replayFullConversation: true falls back to the region when the surface is unreadable', async () => {
+	const { engine, calls, agent } = makeEngine(fakeSession({ withSurface: false }), REPLAY_ON);
+	await engine.summarize(REGION_INPUT, agent, undefined).catch(() => {});
+
+	assert.deepEqual(conversation(calls[0]), ['SYSTEM', 'U1', 'A1'], 'no projection → caller\'s own input');
+});
+
+test('replayFullConversation: true falls back to the region on an empty surface', async () => {
+	const { engine, calls, agent } = makeEngine(fakeSession({ emptySurface: true }), REPLAY_ON);
+	await engine.summarize(REGION_INPUT, agent, undefined).catch(() => {});
+
+	assert.deepEqual(conversation(calls[0]), ['SYSTEM', 'U1', 'A1'], 'empty surface → caller\'s own input');
+});
+
+//#endregion

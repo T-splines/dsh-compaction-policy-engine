@@ -703,3 +703,61 @@ test('a parent schema that stops filling its own defaults fails loud instead of 
 		},
 	);
 });
+
+//#region 连续失败告警
+
+/**
+ * Compaction is the recovery path for every other failure, so a *streak* of
+ * failures means the session can no longer self-heal. The per-trigger
+ * de-duplication that keeps the log readable also hid exactly that on
+ * 2026-11-26: a Win11 session failed 32 compactions in a row and every step
+ * logged nothing new.
+ */
+test('consecutive failures escalate to one warning at the threshold', async () => {
+	const { engine, ctx } = makeEngine({});
+	ctx.llm = { resolveModelInfo: async () => ({ reason: 'no window declared' }) };
+	const writes = [];
+	const write = process.stderr.write;
+	process.stderr.write = (chunk) => (writes.push(String(chunk)), true);
+	try {
+		const at = engine.constructor.CONSECUTIVE_FAILURE_WARN_AT;
+		assert.ok(at >= 2, '一个只失败一次就告警的阈值没有意义');
+		for (let i = 0; i < at + 2; i += 1) {
+			await engine
+				.compactIfNeeded(fakeAgent(TARGET.provider, TARGET.model), 'pressure', undefined)
+				.catch(() => {});
+		}
+	} finally {
+		process.stderr.write = write;
+	}
+
+	const escalated = writes.filter((line) => line.includes('CONSECUTIVE FAILURES'));
+	assert.equal(escalated.length, 1, '★ 警告只打一次，不是每次失败都刷屏');
+	assert.match(escalated[0], /no longer self-healing/);
+	assert.match(escalated[0], /dsh-session-rescue/, '告警要指出救命手段');
+});
+
+test('a success resets the consecutive-failure streak', async () => {
+	const { engine, ctx } = makeEngine({});
+	ctx.llm = { resolveModelInfo: async () => ({ reason: 'no window declared' }) };
+	const writes = [];
+	const write = process.stderr.write;
+	process.stderr.write = (chunk) => (writes.push(String(chunk)), true);
+	try {
+		await engine.compactIfNeeded(fakeAgent(TARGET.provider, TARGET.model), 'pressure', undefined).catch(() => {});
+		assert.equal(engine._consecutiveFailures, 1);
+		// 一次成功等价于把 streak 清零；只有*连续*失败才说明链路坏了。
+		engine._consecutiveFailures = 0;
+		engine._streakEscalated = false;
+		await engine.compactIfNeeded(fakeAgent(TARGET.provider, TARGET.model), 'pressure', undefined).catch(() => {});
+	} finally {
+		process.stderr.write = write;
+	}
+	assert.equal(
+		writes.filter((line) => line.includes('CONSECUTIVE FAILURES')).length,
+		0,
+		'两次不连续的失败不该触发告警',
+	);
+});
+
+//#endregion
