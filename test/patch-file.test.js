@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
 import { patchFilePaths, readPatchEntryConfig } from '../lib/settings-file.js';
 
@@ -108,17 +108,26 @@ test('a missing entry yields undefined rather than a partial document', () => {
 test('patch paths never escape the redirected DSH_HOME', () => {
 	// A test that redirects DSH_HOME must not have the real profile read into it;
 	// a hardcoded absolute path outranked the redirect and replaced every fixture.
-	const paths = patchFilePaths({ DSH_HOME: '/tmp/cc-home-probe', HOME: '/tmp/cc-home-probe' });
+	//
+	// The expected prefix is built with `join`, not written as a POSIX string:
+	// `patchFilePaths` uses `path.join`, which on Windows answers
+	// `\tmp\cc-home-probe\...`. Asserting a literal `/tmp/.../` there failed on
+	// every Windows run while the product code was correct — the assertion, not
+	// the behaviour, was platform-specific.
+	const home = join(tmpdir(), 'cc-home-probe');
+	const paths = patchFilePaths({ DSH_HOME: home, HOME: home });
 	assert.ok(paths.length > 0);
+	const prefix = join(home, 'profiles') + sep;
 	for (const path of paths) {
-		assert.ok(path.startsWith('/tmp/cc-home-probe/'), `${path} escaped the redirect`);
+		assert.ok(path.startsWith(prefix), `${path} escaped the redirect`);
 	}
 });
 
 test('a named profile is tried before the default one', () => {
-	const paths = patchFilePaths({ DSH_HOME: '/tmp/cc-home-probe', DSH_PROFILE: 'dev' });
-	assert.equal(paths[0], '/tmp/cc-home-probe/profiles/dev/cordis.patch.yml');
-	assert.ok(paths.includes('/tmp/cc-home-probe/profiles/web/cordis.patch.yml'));
+	const home = join(tmpdir(), 'cc-home-probe');
+	const paths = patchFilePaths({ DSH_HOME: home, DSH_PROFILE: 'dev' });
+	assert.equal(paths[0], join(home, 'profiles', 'dev', 'cordis.patch.yml'));
+	assert.ok(paths.includes(join(home, 'profiles', 'web', 'cordis.patch.yml')));
 });
 
 test('the settings-plane entry wins even when the host entry appears first', () => {
