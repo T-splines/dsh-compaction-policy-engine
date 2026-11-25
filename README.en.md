@@ -339,6 +339,25 @@ npm test
 - `client-policy.test.js` / `client.test.js` — panel calculations, unit switching, provider
   layers, session badge, illegal value blocking, inline bundle consistency.
 
+## Tested platforms
+
+The suite is run, and passes, on every platform listed here — this is measured, not
+assumed:
+
+| Platform | Version | Result | How |
+|:--|:--|:--|:--|
+| macOS | 26.6.2 arm64 | ✅ 198/198 | full `npm test` on the machine |
+| Windows | 11 22631 x64 | ✅ 198/198 | full `npm test` on real hardware |
+| Linux | ubuntu-latest x64 | ✅ 198/198 | GitHub Actions (Node 20 / 22) |
+
+The Windows row was added on 2026-11-25, when CI ran `ubuntu-latest` only and most
+users were on Windows. The first real Windows run found two Windows-only failures (POSIX path assertions,
+then a `TMPDIR` fallback), which is exactly why the job is there.
+
+> Only platforms the suite has actually run on are listed. Absence here does not
+> mean "unsupported" — it means nobody has verified it yet. If you ran the suite
+> somewhere else, a PR adding the row is welcome.
+
 ## Compatibility and migration
 
 - DSH `0.2.1-rc.x` / `0.2.2-rc.x` (`engines.dsh`: `>=0.2.1-0 <0.3.0-0`), Node.js 20+.
@@ -348,6 +367,26 @@ npm test
   to `@magic6/dsh-compaction-policy-engine` (and `.../engine` for the engine row).
 - The engine is still a subclass of the official `BasicCompactionEngine`; no `node_modules`
   patch is required.
+
+## Reporting a problem
+
+Open an issue — no need to work out first whether it is your configuration:
+
+- 🐞 **[Bug report](https://github.com/T-splines/dsh-compaction-policy-engine/issues/new?template=bug_report.yml)**
+  — wrong behaviour, a crash, a chain that should have fallen back and did not, a
+  breaker that never recovers.
+- ❓ **[Config question](https://github.com/T-splines/dsh-compaction-policy-engine/issues/new?template=config_question.yml)**
+  — it runs, but does not do what you configured.
+
+Four details usually decide the case, so include them if you can:
+
+1. plugin version and DSH version;
+2. operating system (temporary directories and path joining differ per platform);
+3. the exact `code` and `message` — not a paraphrase;
+4. the effective values the settings panel shows, and whether they came from
+   `settings.yaml` or the profile patch.
+
+Security issues: please do not open a public issue — use [SECURITY.md](SECURITY.md).
 
 ## License
 

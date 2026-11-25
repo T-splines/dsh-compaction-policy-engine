@@ -294,6 +294,24 @@ npm test
 - `client-policy.test.js` / `client.test.js` — 面板计算、单位切换、供应商层、会话徽标、
   非法值拦截、内联 bundle 一致性。
 
+## 支持的平台
+
+测试套件在下面这些环境里**实际跑过并通过**，不是「应该能跑」：
+
+| 平台 | 版本 | 结果 | 验证方式 |
+|:--|:--|:--|:--|
+| macOS | 26.6.2 arm64 | ✅ 198/198 | 本机全量 `npm test` |
+| Windows | 11 22631 x64 | ✅ 198/198 | 真机全量 `npm test` |
+| Linux | ubuntu-latest x64 | ✅ 198/198 | GitHub Actions（Node 20 / 22） |
+
+Windows 一行是 2026-11-25 才加上的：在那之前 CI 只跑 `ubuntu-latest`，
+而用户主要在 Windows 上用。第一次在真机跑就抓出两个 Windows 独有的测试
+失败（见 CHANGELOG）。现在 `.github/workflows/ci.yml` 里有一个
+`windows-latest` 任务，这类问题不会再漏过去。
+
+> 只列跑过测试的平台。没在这里出现 ≠ 不支持，只是还没人验证过 ——
+> 如果你在别的平台跑通了，欢迎提 PR 把这一行补上。
+
 ## 兼容与迁移
 
 - DSH `0.2.1-rc.x` / `0.2.2-rc.x`（`engines.dsh`：`>=0.2.1-0 <0.3.0-0`）、Node.js 20+。
@@ -302,6 +320,24 @@ npm test
   `compaction-control:` 设置命名空间。把 profile/preset 里的 `name:` 改成
   `@magic6/dsh-compaction-policy-engine`（引擎行加 `/engine`）即可。
 - 仍然是官方 `BasicCompactionEngine` 的子类，不需要改 `node_modules`。
+
+## 报告问题
+
+发现 bug 请直接开 issue —— 不用先确认是不是自己的配置问题，贴上来我们一起看：
+
+- 🐞 **[Bug report](https://github.com/T-splines/dsh-compaction-policy-engine/issues/new?template=bug_report.yml)**
+  —— 行为不对、崩溃、该 fallback 没 fallback、熔断恢复不了。
+- ❓ **[Config question](https://github.com/T-splines/dsh-compaction-policy-engine/issues/new?template=config_question.yml)**
+  —— 能跑，但行为和配置不一致。
+
+提 issue 时如果方便，附上这几样，通常当天就能定位：
+
+1. 插件版本与 DSH 版本；
+2. 操作系统（各平台的临时目录与路径拼接差异很大，别省）；
+3. 原始的 `code` 和 `message`，不要转述；
+4. 设置面板显示的生效值，以及它来自 `settings.yaml` 还是 profile patch。
+
+安全相关问题请不要开公开 issue，按 [SECURITY.md](SECURITY.md) 私下报。
 
 ## 许可
 

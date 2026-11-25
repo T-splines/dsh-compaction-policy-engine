@@ -1,0 +1,85 @@
+name: Bug report
+description: Something went wrong — behaviour, crash, wrong fallback, stuck breaker
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Three details decide most of these cases, so
+        please fill in as much as you can — a report with them is usually fixed
+        the same day.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what actually happened.
+      placeholder: |
+        Expected: the chain falls back to the next target after eco returns 400.
+        Actual: the whole turn failed with INVALID_REQUEST.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Plugin version
+      description: "`npm ls @magic6/dsh-compaction-policy-engine` in your profile, or the number in the market."
+      placeholder: "0.5.7"
+    validations:
+      required: true
+
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DSH version and how you run it
+      description: The harness version, plus `web` / `desktop` / `headless` / `tui`.
+      placeholder: "0.2.1-rc.2, dsh web, macOS 26 arm64"
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: OS and architecture
+      description: Compaction behaviour differs by model and by how the session was built, so name the model you were on.
+      placeholder: "Windows 11 x64 / macOS 26 arm64 / Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: textarea
+    id: error
+    attributes:
+      label: The error, verbatim
+      description: |
+        The exact `code` and `message` from the failure, not a paraphrase, plus
+        the `[compaction] FAILED …` line the engine logs.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Your `compaction-control` config
+      description: |
+        The relevant block from your profile's `cordis.patch.yml`.
+        **Remove API keys and base URLs you do not want public.**
+      render: yaml
+    validations:
+      required: false
+
+  - type: textarea
+    id: effective-policy
+    attributes:
+      label: The effective policy
+      description: |
+        What the settings panel shows as effective (threshold / retain /
+        summarization model), and where it came from — `settings.yaml`, the
+        profile patch, or the composition's defaults. A gate that runs on
+        0.8 while the file says 0.2 is the bug this plugin exists to end, so
+        the source matters as much as the number.
+      render: text
+    validations:
+      required: false
