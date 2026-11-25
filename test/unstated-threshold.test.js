@@ -57,16 +57,50 @@ test('a policy that states no threshold warns once, naming the baseline', () => 
 
 test('a policy that states a ratio is never reported', () => {
 	const engine = fakeEngine();
-	const lines = capture(() => reportUnstatedThreshold(engine, TARGET, { thresholdRatio: 0.42, retainRatio: 0.1 }));
+	// The resolved shape `resolvePolicy` actually returns: `source.threshold.layer`
+	// names the winning layer, and `'engine'` means none of the operator's layers
+	// said anything. It is that, not the presence of `thresholdRatio` (the resolver
+	// always fills that from its default), which distinguishes stated from unstated.
+	const lines = capture(() =>
+		reportUnstatedThreshold(engine, TARGET, {
+			thresholdRatio: 0.42,
+			retainRatio: 0.1,
+			source: { threshold: { layer: 'default', unit: 'ratio' } },
+		}),
+	);
 
 	assert.deepEqual(lines, [], '42% is stated, so there is nothing to report');
 });
 
 test('a policy that states an absolute budget is never reported', () => {
 	const engine = fakeEngine();
-	const lines = capture(() => reportUnstatedThreshold(engine, TARGET, { thresholdTokens: 220_200, retainRatio: 0.1 }));
+	const lines = capture(() =>
+		reportUnstatedThreshold(engine, TARGET, {
+			thresholdTokens: 220_200,
+			retainRatio: 0.1,
+			source: { threshold: { layer: 'model', unit: 'tokens' } },
+		}),
+	);
 
 	assert.deepEqual(lines, [], 'an absolute budget is a stated threshold too');
+});
+
+test('a resolved policy whose threshold came from the engine default *is* reported', () => {
+	// Regression guard for the bug above: this is the shape the resolver returns
+	// when no layer states a threshold, and it used to be treated as "stated"
+	// because `thresholdRatio` was defined. The warning could never fire in
+	// production, which is exactly the silence it exists to break.
+	const engine = fakeEngine();
+	const lines = capture(() =>
+		reportUnstatedThreshold(engine, TARGET, {
+			thresholdRatio: 0.8,
+			retainRatio: 0.16,
+			source: { threshold: { layer: 'engine', unit: 'ratio' } },
+		}),
+	);
+
+	assert.equal(lines.length, 1, '★ the engine baseline must be reported');
+	assert.match(lines[0], /NO THRESHOLD/);
 });
 
 test('an unrouted target reports under its own key', () => {

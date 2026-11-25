@@ -1,6 +1,6 @@
 {
   "name": "@magic6/dsh-compaction-policy-engine",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "description": "Layered, live-reloading context compaction policy for DeepSeek Harness: provider-level rules, field-by-field inheritance, ratio/token units and a settings panel on top of the official engine.",
   "type": "module",
   "main": "lib/companion.js",
@@ -23,6 +23,7 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
+    "test:e2e": "e2e/run.sh",
     "prepublishOnly": "npm test"
   },
   "keywords": [

@@ -37,3 +37,19 @@ jobs:
           node-version: 22
       - run: npm install --no-audit --no-fund
       - run: npm test
+
+  # 端到端：真的起一个 dsh、加载这个包、让压缩门槛真的被跨过。
+  # 0.5.9 靠这一层抓到三个单元测试测不出的 bug（诊断撒谎、读错 profile、
+  # 告警永不打印）。不需要任何 API key（假 provider 指向 127.0.0.1）。
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm install --global @deepseek-ai/dsh@0.2.2-rc.5
+      - name: Run e2e scenarios
+        run: e2e/run.sh

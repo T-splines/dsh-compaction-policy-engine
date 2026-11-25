@@ -358,6 +358,28 @@ then a `TMPDIR` fallback), which is exactly why the job is there.
 > mean "unsupported" — it means nobody has verified it yet. If you ran the suite
 > somewhere else, a PR adding the row is welcome.
 
+## End-to-end self-check
+
+The unit suite exercises the policy resolver with a fake engine and a fake meter; it
+cannot tell you whether a real host ever receives the policy. A second layer does:
+
+```bash
+npm run test:e2e      # same as e2e/run.sh
+```
+
+It starts an isolated `DSH_HOME`, builds a temporary profile, installs this package, and
+points a fake provider at `127.0.0.1` with a deliberately huge `contextWindow` and an
+**absolute** token threshold — so a handful of short turns crosses the gate without
+spending 12k real tokens. It then waits for `gate=wait` to become `gate=FIRE`.
+
+Assertions do not stop at "compaction fired": they also check **which layer `source=`
+names**, whether `thresholdTokens` equals the configured value, and whether `measured`
+actually falls back below the threshold afterwards. See [e2e/README.md](e2e/README.md).
+
+> This layer found three bugs in 0.5.9 that the unit suite could not — two of them were
+> diagnostics lying about their own provenance. The acceptance rule for a new scenario is
+> in that README: **it must go red on the old version.**
+
 ## Compatibility and migration
 
 - DSH `0.2.1-rc.x` / `0.2.2-rc.x` (`engines.dsh`: `>=0.2.1-0 <0.3.0-0`), Node.js 20+.

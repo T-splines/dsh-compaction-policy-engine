@@ -130,6 +130,31 @@ test('a named profile is tried before the default one', () => {
 	assert.ok(paths.includes(join(home, 'profiles', 'web', 'cordis.patch.yml')));
 });
 
+test('the running profile outranks an inherited DSH_PROFILE', () => {
+	// Measured 2026-11-25: `DSH_PROFILE` is injected by the *host* into every
+	// shell tool execution, so a `dsh --profile headless …` launched from inside
+	// an agent inherits the parent's profile name. Trusting it made this plugin
+	// watch `profiles/web/cordis.patch.yml` while running under `--profile
+	// headless` — a patch layer that was present and correct read as absent,
+	// silently, once a second. `ctx.profileContext.name` is the host's own
+	// answer and must win.
+	const paths = patchFilePaths({ DSH_HOME: '/home/x', DSH_PROFILE: 'web' }, 'headless');
+
+	assert.deepEqual(paths, [
+		join('/home/x', 'profiles', 'headless', 'cordis.patch.yml'),
+		join('/home/x', 'profiles', 'web', 'cordis.patch.yml'),
+	], 'the running profile is searched first, the inherited one only as a fallback');
+});
+
+test('without a running profile name the env hint is still honored', () => {
+	const paths = patchFilePaths({ DSH_HOME: '/home/x', DSH_PROFILE: 'dev' });
+
+	assert.deepEqual(paths, [
+		join('/home/x', 'profiles', 'dev', 'cordis.patch.yml'),
+		join('/home/x', 'profiles', 'web', 'cordis.patch.yml'),
+	]);
+});
+
 test('the settings-plane entry wins even when the host entry appears first', () => {
 	const text = [
 		'- id: compaction-control-host',
