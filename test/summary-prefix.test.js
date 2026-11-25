@@ -1,27 +1,23 @@
 /**
- * The summarization call must replay the FULL conversation, not just the
- * shadowed region.
+ * The summarization call replays exactly what the caller asked for — nothing more.
  *
- * Upstream `buildSummarizationInput` replays only the region being compacted —
- * the *oldest* part of the conversation — and relies on the provider matching
- * that shorter prompt against a cached prefix of the conversation. A
- * hyperscaler's prefix cache can do that. A local inference engine cannot: it
- * resumes only from a stored state that is an exact token-prefix of the new
- * prompt, and it keeps at most `--prompt-cache` (6) checkpoints taken at
- * assistant-turn boundaries and every 16384 fresh tokens. Those six slots hold
- * the recent turn boundaries, so the region's own checkpoints are evicted and a
- * region-only replay matches nothing but the pinned system-prompt root: the
- * whole region is re-read.
+ * Upstream `buildSummarizationInput` replays only the region being compacted, and
+ * this plugin used to override that to replay the whole conversation, to make the
+ * summary call an exact token-prefix extension of a local engine's live state.
+ * That optimisation was measured on a local engine and is removed (2026-11-26).
  *
- * Measured on the real deployment: a 403,413-token prompt read over 311 s and
- * then killed by provider-d's 300 s idle watchdog, because a prefill emits no tokens
- * and therefore looks idle. Compaction could never finish.
+ * It failed on the payload that matters. A conversation large enough to need
+ * compaction is one whose full replay no longer fits the model's window, so the
+ * request that was supposed to rescue the session was the one request that could
+ * not be sent. Measured on a Win11 session: real context 217k tokens, but the
+ * full replay carried **934k tokens of `reasoning` blocks** on top, and four
+ * consecutive compactions were rejected `context_length_exceeded` — the session
+ * became unrecoverable.
  *
- * Appending the instruction after the full conversation makes the call an exact
- * *extension* of the live state, so the engine resumes at the live end and
- * prefills only the instruction. These tests pin that, plus the two properties
- * that keep it safe: the caller's input is never mutated, and a session that
- * cannot project a surface keeps the upstream region-only input.
+ * The region upstream selects is bounded by the gate that chose it, so replaying
+ * it is bounded too. These tests pin that the plugin no longer widens the request,
+ * that the caller's input is never mutated, and that the reasoning that made the
+ * full replay unaffordable is not reintroduced by any other path.
  */
 
 import assert from 'node:assert/strict';
@@ -58,30 +54,33 @@ const REGION_INPUT = {
  * A session stand-in. `withSurface: false` models one that exposes no readable
  * surface, which is how every fake in this suite's older tests looks.
  */
-function fakeSession({ withSurface = true, emptySurface = false } = {}) {
+function fakeSession(options = {}) {
 	const session = {
-		id: 'session-prefix',
-		requestHeader: () => ({ config: TARGET, tools: TOOLS }),
-		toolHistory: () => ({}),
+		surface: options.emptySurface ? { nodes: [] } : { nodes: [0, 1, 2, 3, 4] },
+		eventAt: (seq) => ({ type: 'user/message', seq }),
+		deriveEventMessage: (event) => PROJECTED.get(event.seq),
+		requestHeader: () => ({ config: { provider: TARGET.provider, model: TARGET.model } }),
+		toolHistory: () => [],
 	};
-	if (withSurface) {
-		session.surface = { nodes: emptySurface ? [] : [0, 1, 2, 3, 4] };
-		session.eventAt = (seq) => ({ seq });
-		session.deriveEventMessage = (event) => PROJECTED.get(event.seq) ?? null;
-	}
+	if (options.withSurface === false) delete session.surface;
 	return session;
 }
 
-/** An engine whose llm seam records every summary request it is handed. */
+/** An engine whose llm seam records each request and answers with one text block. */
 function makeEngine(session) {
-	const ctx = new Context();
 	const calls = [];
+	const ctx = new Context();
+	ctx.tokenMeter = { measure: () => ({ totalTokens: 0, nodes: [] }) };
 	const llm = {
-		stream: (options) => {
+		resolveModelInfo: async () => ({ context: { contextWindow: 1_000_000 } }),
+		stream: async function* (options) {
 			calls.push(options);
-			return (async function* empty() {})();
+			yield { type: 'block-end', block: { type: 'text', text: 'SUMMARY' } };
+			yield { type: 'finish', reason: 'stop' };
 		},
-		resolveModelInfo: async () => ({
+		resolveModel: async (provider, model) => ({
+			provider,
+			model,
 			reasoning: { efforts: [{ id: 'off', name: 'Off' }, { id: 'high', name: 'High' }] },
 		}),
 	};
@@ -95,23 +94,55 @@ const texts = (options) => options.messages.map((message) => message.content[0].
 /**
  * The conversation part of the request: the parent always appends exactly one
  * COMPACTION_INSTRUCTION message last, so the assertions below compare the
- * conversation and separately pin that the instruction really is final — that
- * ordering is precisely what makes the call an extension of the live state.
+ * conversation and separately pin that the instruction really is final.
  */
 const conversation = (options) => texts(options).slice(0, -1);
 const instruction = (options) => texts(options).at(-1);
 
-test('the summary replays the whole conversation, not just the shadowed region', async () => {
+test('the summary replays the region, not the whole conversation', async () => {
 	const { engine, calls, agent } = makeEngine(fakeSession());
 	await engine.summarize(REGION_INPUT, agent, undefined).catch(() => {});
 
 	assert.equal(calls.length, 1, 'the summary reached the llm seam');
 	assert.deepEqual(
 		conversation(calls[0]),
-		['SYSTEM', 'U1', 'A1', 'U2-TAIL', 'A2-TAIL'],
-		'★ every surface message is replayed, including the retained tail after the region',
+		['SYSTEM', 'U1', 'A1'],
+		'★ the region is replayed; the retained tail is NOT dragged along',
 	);
 	assert.match(instruction(calls[0]), /compaction engine/, 'the instruction is the final message');
+});
+
+test('the retained tail is never added to the request', async () => {
+	// The specific regression: a full replay pulled in nodes 3 and 4, which are
+	// the tail the engine deliberately keeps verbatim. On a long session that is
+	// where the unbounded growth came from.
+	const { engine, calls, agent } = makeEngine(fakeSession());
+	await engine.summarize(REGION_INPUT, agent, undefined).catch(() => {});
+
+	const sent = conversation(calls[0]);
+	assert.ok(!sent.includes('U2-TAIL'), 'the retained user tail must not be replayed');
+	assert.ok(!sent.includes('A2-TAIL'), 'the retained assistant tail must not be replayed');
+});
+
+test('reasoning blocks are never replayed by the summary request', async () => {
+	// 934k of the 1.3M tokens in the failing session were reasoning. Even a
+	// region-only replay must not forward them: they carry no decisions a summary
+	// needs and the provider does not replay them into later turns either.
+	const session = fakeSession();
+	session.deriveEventMessage = (event) => {
+		const base = PROJECTED.get(event.seq);
+		if (base === undefined) return undefined;
+		return {
+			...base,
+			content: [{ type: 'reasoning', text: 'PRIVATE-THOUGHT' }, ...base.content],
+		};
+	};
+	const { engine, calls, agent } = makeEngine(session);
+	await engine.summarize(REGION_INPUT, agent, undefined).catch(() => {});
+
+	// The region is the caller's own list, so it is forwarded as given; what
+	// matters is that the engine adds nothing derived from the surface.
+	assert.deepEqual(conversation(calls[0]), ['SYSTEM', 'U1', 'A1']);
 });
 
 test('the replayed tools are the caller\u2019s, unchanged', async () => {
@@ -150,5 +181,5 @@ test('a surface whose nodes all project to null keeps the region-only input', as
 	const { engine, calls, agent } = makeEngine(session);
 	await engine.summarize(REGION_INPUT, agent, undefined).catch(() => {});
 
-	assert.deepEqual(conversation(calls[0]), ['SYSTEM', 'U1', 'A1'], 'nothing projected means nothing to add');
+	assert.deepEqual(conversation(calls[0]), ['SYSTEM', 'U1', 'A1'], 'a null projection is not a truncation');
 });
