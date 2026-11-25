@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.8] - 2026-11-25
+
+### Documentation
+
+- README (both languages) now carries a **tested platforms** table — macOS, Windows
+  and Linux, each with the actual pass count — and a **reporting a problem** section.
+- `.github/ISSUE_TEMPLATE/` added: `bug_report.yml` (asks for the effective policy
+  and where it came from) and `config_question.yml`.
+
 ## [0.5.7] - 2026-11-25
 
 ### Fixed
@@ -14,7 +23,6 @@ All notable changes to this project are documented here. The format follows
   `/tmp/x.yaml` is drive-relative there, so it resolved to `D:\tmp\x.yaml` and
   the test died with `ENOENT`. Now uses `os.tmpdir()`. This one reached users:
   the suite is what a Windows contributor runs before sending a patch.
-
 ## [0.5.6] - 2026-11-25
 
 ### Fixed
