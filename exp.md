@@ -157,3 +157,30 @@ curl -s -H "Accept: application/vnd.npm.install-v1+json" \
   等于白白多了一个空版本号。
 - 端到端验证要用**分发产物**（`dsh plugin add` 从 registry 装），不能用本地目录装 ——
   本地装测不到这类发布问题。
+
+### 追加（2026-11-26 晚，又踩了一次）
+
+记过了还是又踩一遍，说明上一条缺的是**可执行的判定与动作**，不是道理。补上：
+
+**发布后必跑的三行（缺一不可）**：
+```bash
+PKG=@magic6/dsh-compaction-policy-engine
+node -p "require('./package.json').version"                    # ① 本地准备发的是几
+curl -s https://registry.npmjs.org/$PKG | jq -r '.["dist-tags"].latest'   # ② registry 的 latest
+npm install $PKG@latest --prefix /tmp/verify-$RANDOM && \
+  node -p "require('/tmp/verify-*/node_modules/'+'$PKG'+'/package.json').version"   # ③ 装下来是几
+```
+②③ 都等于 ① 才算发布完成。**只看 `npm publish` 的 `+` 行等于没验证。**
+
+**这次的实际现象**：0.5.12 进了 `versions` 但 `latest` 停在 0.5.11；
+紧接着发 0.5.13 又撞 E409。两次都以为"发布失败了"，其实都是**已暂存，
+缺 dist-tag 收尾**。
+
+**E409 的正确动作（只此一条，不要升版本号）**：
+```bash
+npm dist-tag add $PKG@<那个撞 E409 的版本> latest
+```
+升版本号 = 制造一个永远没人装的空版本，registry 上永久多一行垃圾。
+
+**`npm install` 会骗你**：包名带 `@latest` 时若本地有旧缓存，装下来的可能是旧版。
+判断安装结果之前先 `rm -rf node_modules` 或用全新临时目录，别在旧目录里看版本号。

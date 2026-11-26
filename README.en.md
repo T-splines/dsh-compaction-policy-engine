@@ -55,8 +55,11 @@ A model can override `threshold` while still inheriting `retain`, `maxTokens`,
   window; `thresholdTokens` / `retainTokens` are absolute budgets. The plugin converts
   exactly back into the parent engine's ratio (`(tokens + 0.5) / window`) and **refuses to
   guess** when a route declares no window, naming the route in the error.
-- **Live reload.** The engine polls `settings.yaml` and the `compaction-control-settings`
-  row every second; a policy edit applies to the next compaction without restarting DSH.
+- **Live reload (configuration, not code).** The engine polls `settings.yaml` and the
+  `compaction-control-settings` row every second; a **policy edit** applies to the next
+  compaction without restarting DSH. This covers configuration only: **upgrading the plugin
+  itself always requires a restart**, because loaded modules are never replaced
+  (see [Live reload scope](#live-reload-scope)).
   The panel writes the same document. The engine mount row's own `config:` is read at load
   (see [Install and mount](#install-and-mount)).
 - **Partial settings document.** The `compaction-control:` section in `settings.yaml` is
@@ -85,6 +88,18 @@ Requirements: DSH `0.2.1-rc.x` / `0.2.2-rc.x`, Node.js 20+.
 ```bash
 dsh plugin --profile web add @magic6/dsh-compaction-policy-engine
 ```
+
+> ⚠️ **Restart DSH after installing or upgrading.**
+>
+> `dsh plugin add` only writes the package to disk; a running process does not reload modules
+> (`dsh-app-boot`: *"Package contents and loaded modules are not reloaded."*). Until you
+> restart, the settings panel already reports the new version while the old code is still
+> executing — **the version string does not prove the plugin is live**. Upgrading from
+> `< 0.5.10` is the worst case: that bundle shipped its engine `disabled: true`, so without a
+> restart there is no compaction at all and the trigger stays at the official 80% default.
+>
+> Verify after restarting: with `DSH_COMPACT_DEBUG=1` the log should show `[compact-debug]`
+> lines, and a successful compaction logs `[compaction] FIRED`.
 
 The npm package includes `examples/standard-with-policy` for reference; the preset override
 rules below still apply. The `$PWD` commands in the web section assume a source checkout.

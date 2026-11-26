@@ -49,9 +49,9 @@ models[]  →  providers{}  →  default
   `thresholdTokens` / `retainTokens` 是绝对预算。换算写回父类时使用
   `(tokens + 0.5) / window`，保证精确回到声明的数；路由没有声明窗口时**拒绝猜**，
   在真正需要策略的那一步报错并点名路由。
-- **热加载。** 引擎每秒轮询 `settings.yaml` 与 `compaction-control-settings` 行；策略修改在
-  下一次压缩生效，不需要重启。面板写的是同一份文档。引擎挂载行自己的 `config:` 在加载时读取
-  （见[安装与挂载](#安装与挂载)）。
+- **热加载（配置，不含代码）。** 引擎每秒轮询 `settings.yaml` 与 `compaction-control-settings`
+  行；**策略修改**在下一次压缩生效，不需要重启。但这只覆盖配置：**升级插件版本必须重启
+  DSH**，已加载的模块不会被替换（见[热加载范围](#热加载范围)）。
 - **部分文档合并。** `settings.yaml` 的 `compaction-control:` 段与挂载行 `config:` **逐字段**
   合并（映射递归、数组整体替换），面板保存不会悄悄抹掉 profile 里的 `models[]` 层。
 - **设置面板。** 编辑全局层或某个供应商层，切换单位时不留下两个键，空隙过小时给出红字提示；
@@ -74,6 +74,17 @@ models[]  →  providers{}  →  default
 ```bash
 dsh plugin --profile web add @magic6/dsh-compaction-policy-engine
 ```
+
+> ⚠️ **装完 / 升级完，必须重启 DSH 才会生效。**
+>
+> `dsh plugin add` 只把包写到磁盘；正在运行的进程不会重新加载模块
+> （`dsh-app-boot`：*"Package contents and loaded modules are not reloaded."*）。
+> 重启之前，设置页显示的版本号已经是新的，但跑的仍是旧代码——**版本号不能用来判断是否生效**。
+> 从 `< 0.5.10` 升级尤其明显：旧 bundle 的引擎是 `disabled: true`，不重启就等于没有压缩，
+> 触发点还停在官方默认的 80%。
+>
+> 重启后确认：`DSH_COMPACT_DEBUG=1` 下日志里应出现 `[compact-debug]` 行，压缩成功时出现
+> `[compaction] FIRED`。
 
 npm 包里包含 `examples/standard-with-policy` 供参考；下面的 preset 覆盖规则仍然适用。
 web 小节里的 `$PWD` 命令假设使用源码检出。
@@ -174,6 +185,23 @@ dsh plugin --profile web add "$PWD/examples/standard-with-policy"
 设置面板写 `$DSH_HOME/settings.yaml`。引擎每秒轮询该文件**以及** `compaction-control-settings`
 行，所以面板修改和这一行的修改会在下一次压缩生效，不需要重启。**引擎挂载行**
 （`compaction-control`）的 `config:` 在插件加载时读取，改它需要重启。
+
+> ⚠️ **升级插件本身必须重启 DSH。**
+>
+> 热加载只覆盖配置文档，**不覆盖代码**。DSH 的加载器把已安装的模块留在进程里：
+> `dsh-app-boot` 的 `refresh()` 原文是 *"Package contents and loaded modules are not
+> reloaded."*，设置豁免的路径也写着 *"Existing plugin instances are not reloaded by
+> this operation."*。所以 `dsh plugin add <包>@<新版本>` 之后：
+>
+> - 磁盘上的版本号已经是新的（设置页、`package.json` 都会显示新版本），
+> - 但**正在运行的进程里仍是旧代码**，压缩走的是旧逻辑。
+>
+> 这种错配特别难看出来，因为版本号是对的。判断依据只能是行为：重启后看日志里有没有
+> `[compact-debug]` 行（需要 `DSH_COMPACT_DEBUG=1`）与 `[compaction] FIRED`。
+>
+> 具体到本插件，`< 0.5.10` 的 bundle 带着 `disabled: true`，升级后不重启会**继续没有
+> 压缩**，而且触发的仍是官方引擎的 80% 默认值——看起来像"新版本没生效"，实际是旧代码
+> 还在跑。
 
 ### 阈值语义
 
