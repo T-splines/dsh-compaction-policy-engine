@@ -184,3 +184,42 @@ npm dist-tag add $PKG@<那个撞 E409 的版本> latest
 
 **`npm install` 会骗你**：包名带 `@latest` 时若本地有旧缓存，装下来的可能是旧版。
 判断安装结果之前先 `rm -rf node_modules` 或用全新临时目录，别在旧目录里看版本号。
+
+## [2026-11-26] 发了 npm 没发 Release → dshmarket 永远显示旧版本
+
+**现象**：dshmarket 里我们的插件一直停在旧版，但 `npm view` 明明是新版。
+页面显示 `0.5.8`，npm 上实际是 `0.5.14`。
+
+**根因**：dshmarket 的索引是 `awesome-dsh-plugin.com/updates.json`，它**优先读
+GitHub Release tag**；没有 Release 时退化成从最近 commits 猜一个版本号。我们的
+`publish.yml` 只做 npm publish，**从来没有创建 Release 这一步**，所以：
+
+```
+GitHub Release 最新  v0.5.5   （2026-11-22）
+market 显示          0.5.8     ← 从 commits 猜的
+npm 实际             0.5.14
+```
+
+`publish.yml` 由 tag 触发、权限是 `contents: read`——连创建 Release 的权限都没有。
+
+**修法**（两处，缺一不可）：
+1. `permissions.contents: write`；
+2. 在 npm publish 之后加一步 `gh release create "${GITHUB_REF_NAME}"`，
+   正文取 CHANGELOG 对应小节，取不到就写最小信息（不让「没 changelog」阻塞发版），
+   并先 `gh release view` 判重（手动补发过时不失败）。
+
+**判定依据**（不要看网页找，直接查数据源）：
+```bash
+# market 索引里我们那条
+curl -s https://awesome-dsh-plugin.com/updates.json \
+ | jq '.updates["https://github.com/<owner>/<repo>"]'
+# GitHub 实际有多少 Release
+curl -s https://api.github.com/repos/<owner>/<repo>/releases | jq '.[].tag_name'
+```
+
+**教训**：
+- **「发布」对这类插件是两件事**：npm 包（给 `dsh plugin add` 用）和 GitHub
+  Release（给 market 索引和人类的更新日志用）。只做前者，用户在市场里永远看到旧的。
+- `on: push: tags` 触发的工作流默认 `contents: read`，想建 Release 必须显式提权。
+- 补 Release 时注意 tag 是否真的 push 了：本地 tag 不等于远端 tag
+  （这次 `v0.5.6`~`v0.5.9` 本地有、远端没有，`v0.5.10` 之后两边都没有）。

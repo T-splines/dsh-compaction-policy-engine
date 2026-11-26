@@ -48,7 +48,11 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  # `write` 而不是 `read`：同一个工作流还要建 GitHub Release。
+  # 这一点曾经漏掉，代价是本插件从 v0.5.6 到 v0.5.13 只发了 npm、没发 Release，
+  # 而 dshmarket 是从 Release tag 读版本的 —— 页面上永远停在 v0.5.5※。
+  # ※ 它会在没有 Release 时退化成从 commits 猜，于是显示 0.5.8。
+  contents: write
   # ↓ 这一行是 OIDC 的全部秘密：允许工作流向 npm 证明「我是这个仓库的这个工作流」。
   id-token: write
 
@@ -265,3 +269,52 @@ jobs:
           fi
 
           echo "### ✅ Published ${PKG}@${VERSION} to npmjs (OIDC, no token)" >> "${GITHUB_STEP_SUMMARY}"
+
+      # ── GitHub Release ────────────────────────────────────────────────────
+      #
+      # 发完 npm 必须再发一个 Release，否则 dshmarket 永远看不到新版本。
+      # market 的索引（awesome-dsh-plugin.com/updates.json）优先读 Release tag，
+      # 没有 Release 时退化到从 commits 猜一个版本号 —— 结果是页面停在旧版，
+      # 而 npm 上其实已经发了好几版。2026-11-26 排查时，页面显示 0.5.8
+      # （从 commits 猜的），实际 npm 上已经是 0.5.14。
+      #
+      # 用 `gh release create` 而不是 REST 调用：它自带重试，且已经预装在
+      # ubuntu-latest 上，不需要额外 token 之外的凭据。
+      - name: Publish GitHub Release
+        if: steps.exists.outputs.already != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # 幂等：手动补发过 Release 时不要失败。
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists; skipping."
+            echo "### GitHub Release: already exists" >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          # 正文取 CHANGELOG 里这一版的小节；取不到就用最小可读信息，
+          # 绝不让「没有 changelog」阻塞发版。
+          VERSION_NO_V="${GITHUB_REF_NAME#v}"
+          NOTES=/tmp/release-notes.md
+          if [ -f CHANGELOG.md ]; then
+            awk -v ver="${VERSION_NO_V}" '
+              $0 ~ "^## \\[?v?" ver "\\]?([[:space:]]|$)" { hit=1; next }
+              hit && /^## / { exit }
+              hit { print }
+            ' CHANGELOG.md > "${NOTES}"
+          fi
+          if [ ! -s "${NOTES}" ]; then
+            {
+              echo "npm: \`$(node -p "require('./package.json').name")@${VERSION_NO_V}\`"
+              echo
+              echo "> ⚠️ 升级后必须重启 DSH。热加载只覆盖配置，不覆盖代码 ——"
+              echo "> 不重启时设置页显示新版本，跑的仍是旧代码。"
+            } > "${NOTES}"
+          fi
+
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file "${NOTES}"
+          echo "### ✅ GitHub Release ${GITHUB_REF_NAME} created" >> "${GITHUB_STEP_SUMMARY}"
