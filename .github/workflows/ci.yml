@@ -53,6 +53,8 @@ jobs:
         with:
           node-version: 24
       - run: npm install --no-audit --no-fund
+      # dsh plugin add 会把参数原样转给 pnpm；runner 默认没有（与 dsh-llm-resilience 同一修法）。
+      - run: npm install --global pnpm@11
       - run: npm install --global @deepseek-ai/dsh@0.2.2-rc.5
       - name: Run e2e scenarios
         run: e2e/run.sh
