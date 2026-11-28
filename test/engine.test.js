@@ -18,7 +18,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -32,6 +32,11 @@ import { CompactionConfigError, CompactionControlEngine } from '../lib/index.js'
 // suite, so each case sees exactly the composition config it passes in. The
 // reader's own tests cover the real file.
 process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'cc-engine-test-'));
+// A patch layer that exists but carries no entry for this plugin: the suite must
+// read that as "configured elsewhere" (identical engine behaviour to absent), not
+// trip the missing-layer warning on every engine construction.
+mkdirSync(join(process.env.DSH_HOME, 'profiles', 'web'), { recursive: true });
+writeFileSync(join(process.env.DSH_HOME, 'profiles', 'web', 'cordis.patch.yml'), '- id: nothing-here\n');
 import { resolveConfig, resolvePolicy, toBasicConfig } from '../lib/policy.js';
 
 const TARGET = { provider: 'gateway-b', model: 'model-d' };
@@ -587,6 +592,8 @@ test('a profile per-model layer survives the operator file stating only the glob
 	const home = mkdtempSync(join(tmpdir(), 'cc-overlay-test-'));
 	const previous = process.env.DSH_HOME;
 	process.env.DSH_HOME = home;
+	mkdirSync(join(home, 'profiles', 'web'), { recursive: true });
+	writeFileSync(join(home, 'profiles', 'web', 'cordis.patch.yml'), '- id: nothing-here\n');
 	try {
 		writeFileSync(
 			join(home, 'settings.yaml'),
@@ -761,3 +768,47 @@ test('a success resets the consecutive-failure streak', async () => {
 });
 
 //#endregion
+
+// ── the policy must reach the engine from the home the host reports (2026-11-28) ──
+
+test('with no DSH_HOME or HOME in the environment the engine still reads the patch layer the host mounted', () => {
+	// Win11 desktop, 2026-11-28: the Electron host starts dsh with neither
+	// variable set (Windows has no `HOME`) and `cwd = <home>/profiles/desktop`.
+	// The readers derived `.dsh` from `HOME`, so every candidate was relative,
+	// the patch layer that carried `threshold: 0.42` was never read, and the
+	// engine ran on the 0.8 baseline — while the settings card, fed by the
+	// loader, read 42%. A session reached 74% before anyone noticed.
+	//
+	// The host provides `profileContext` (name, home, patchPath) before any
+	// profile row mounts (`boot()` → `prepare(hostCtx)` → `mountRootInclude`),
+	// so `home` is the authoritative answer and needs no environment at all.
+	const home = mkdtempSync(join(tmpdir(), 'cc-host-home-'));
+	mkdirSync(join(home, 'profiles', 'desktop'), { recursive: true });
+	writeFileSync(
+		join(home, 'profiles', 'desktop', 'cordis.patch.yml'),
+		['- id: compaction-control-settings', '  config:', '    default:', '      threshold: 0.42', '      retain: 0.08', ''].join('\n'),
+	);
+	const previous = { DSH_HOME: process.env.DSH_HOME, HOME: process.env.HOME };
+	delete process.env.DSH_HOME;
+	delete process.env.HOME;
+	let engine;
+	try {
+		const ctx = new Context();
+		ctx.provide('profileContext', { name: 'desktop', home, patchPath: join(home, 'profiles', 'desktop', 'cordis.patch.yml') });
+		engine = new CompactionControlEngine(ctx, {});
+		// The watchers' first read is synchronous, so the policy is in place
+		// before the first step — no restart, no second poll.
+		assert.equal(engine.controlConfig.default.threshold, 0.42, 'the patch layer was read from the host-reported home');
+		assert.equal(engine._fileOrigin, 'cordis.patch.yml');
+		const policy = engine.policyFor({ provider: 'fallback', model: 'auto' }, 1_000_000);
+		assert.equal(policy.thresholdRatio, 0.42, 'the gate runs on the configured ratio, not the 0.8 baseline');
+		assert.equal(policy.retainRatio, 0.08);
+	} finally {
+		for (const [key, value] of Object.entries(previous)) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+		engine?._patchFileWatcher?.();
+		engine?._settingsFileWatcher?.();
+	}
+});

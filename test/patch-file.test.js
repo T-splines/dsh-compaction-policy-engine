@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, sep } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 
 import { patchFilePaths, readPatchEntryConfig } from '../lib/settings-file.js';
 
@@ -140,9 +140,12 @@ test('the running profile outranks an inherited DSH_PROFILE', () => {
 	// answer and must win.
 	const paths = patchFilePaths({ DSH_HOME: '/home/x', DSH_PROFILE: 'web' }, 'headless');
 
+	// Expected values go through `resolve()` as the product does: on Windows
+	// `resolve('/home/x')` is `C:\home\x`, and a `join`-built expectation would
+	// pin the POSIX spelling and fail every Windows run against correct code.
 	assert.deepEqual(paths, [
-		join('/home/x', 'profiles', 'headless', 'cordis.patch.yml'),
-		join('/home/x', 'profiles', 'web', 'cordis.patch.yml'),
+		resolve('/home/x', 'profiles', 'headless', 'cordis.patch.yml'),
+		resolve('/home/x', 'profiles', 'web', 'cordis.patch.yml'),
 	], 'the running profile is searched first, the inherited one only as a fallback');
 });
 
@@ -150,8 +153,8 @@ test('without a running profile name the env hint is still honored', () => {
 	const paths = patchFilePaths({ DSH_HOME: '/home/x', DSH_PROFILE: 'dev' });
 
 	assert.deepEqual(paths, [
-		join('/home/x', 'profiles', 'dev', 'cordis.patch.yml'),
-		join('/home/x', 'profiles', 'web', 'cordis.patch.yml'),
+		resolve('/home/x', 'profiles', 'dev', 'cordis.patch.yml'),
+		resolve('/home/x', 'profiles', 'web', 'cordis.patch.yml'),
 	]);
 });
 

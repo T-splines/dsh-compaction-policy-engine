@@ -22,11 +22,16 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'cc-summary-prefix-test-'));
+// A patch layer that exists but carries no entry for this plugin: the suite must
+// read that as "configured elsewhere" (identical engine behaviour to absent), not
+// trip the missing-layer warning on every engine construction.
+mkdirSync(join(process.env.DSH_HOME, 'profiles', 'web'), { recursive: true });
+writeFileSync(join(process.env.DSH_HOME, 'profiles', 'web', 'cordis.patch.yml'), '- id: nothing-here\n');
 
 import { Context } from '@deepseek-ai/cordis';
 
