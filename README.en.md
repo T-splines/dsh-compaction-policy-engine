@@ -191,6 +191,16 @@ The settings panel writes `$DSH_HOME/settings.yaml`. The engine polls that file 
 the next compaction without a restart. The **engine mount row** (`compaction-control`) is
 read at plugin load; editing its `config:` requires a restart.
 
+**Where those files are looked up**: the engine resolves the DSH home in the host's own
+order — the home the running host reports (`profileContext.home`, provided before any
+profile row mounts), then a non-blank `$DSH_HOME` (`~` expanded), then `os.homedir()/.dsh`,
+matching `@deepseek-ai/dsh-home-paths`; it never reads `HOME`. Before 0.5.15 the Windows
+desktop host had neither variable set (Windows has no `HOME`, and the desktop app does not
+export `DSH_HOME`), so the path collapsed to a relative `.dsh/…`, the policy file was never
+read, and the engine silently ran on its built-in 0.8 baseline while the settings card —
+fed by the loader — still showed 42%. When no candidate file exists at all, the engine now
+prints one `[compaction] WARNING … no profile patch layer found (tried …)`.
+
 ### Threshold semantics
 
 The official engine's trigger is

@@ -186,6 +186,14 @@ dsh plugin --profile web add "$PWD/examples/standard-with-policy"
 行，所以面板修改和这一行的修改会在下一次压缩生效，不需要重启。**引擎挂载行**
 （`compaction-control`）的 `config:` 在插件加载时读取，改它需要重启。
 
+**这两个文件在哪**：引擎按宿主自己的顺序解析 DSH home —— 先取运行中宿主报告的
+`profileContext.home`（挂载任何插件行之前就已提供），再取非空的 `$DSH_HOME`（支持 `~`），
+最后是 `os.homedir()/.dsh`，与 `@deepseek-ai/dsh-home-paths` 同序；**不读 `HOME`**。
+0.5.15 之前，Windows 桌面版上这两个变量都没有（Windows 没有 `HOME`，桌面版也不导出
+`DSH_HOME`），路径退化成相对的 `.dsh/…`，策略文件从未被读到，引擎静默跑在内置基线 0.8 上，
+而设置卡片走 loader、仍显示 42%。现在若所有候选文件都不存在，会打一行
+`[compaction] WARNING … no profile patch layer found (tried …)`。
+
 > ⚠️ **升级插件本身必须重启 DSH。**
 >
 > 热加载只覆盖配置文档，**不覆盖代码**。DSH 的加载器把已安装的模块留在进程里：

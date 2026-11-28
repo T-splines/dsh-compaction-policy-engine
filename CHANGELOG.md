@@ -4,6 +4,41 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.15] - 2026-11-28
+
+### Fixed — the policy now reaches the engine on the Windows desktop host
+
+On Windows the desktop host starts dsh with neither `DSH_HOME` nor `HOME` set
+(Windows has no `HOME`) and `cwd = <home>/profiles/desktop`. Both file readers
+derived the harness home from `process.env.HOME`, which on that host is the
+relative path `.dsh`: every patch candidate resolved to
+`<home>/profiles/desktop/.dsh/profiles/desktop/cordis.patch.yml`, a file that
+does not exist. A missing candidate is the normal case for every file but one,
+so nothing was reported, and the engine ran on its built-in baseline —
+`thresholdRatio 0.8`, `retainRatio 0.16`, `maxTokens 8192` — while the settings
+card, fed by the loader, read the configured 42%.
+
+Measured on a Win11 `desktop` profile: the only gate-triggered compaction fired
+at 680,081 tokens (the 0.8 threshold with the request's 256k `maxTokens`
+reserved: 678,464); once the request moved to 131k `maxTokens` the threshold
+became 800,000 and the session grew to 745k (74%) without compacting. The
+pressure gate measures provider-reported usage, so "42% in the card, compacts at
+80%" was the entire symptom.
+
+The home is now resolved the way the host resolves it
+(`@deepseek-ai/dsh-home-paths`): the home the running host reports
+(`ctx.profileContext.home`, provided before any profile row mounts), then a
+non-blank `DSH_HOME` (with `~` expansion), then `os.homedir()/.dsh` — never
+`HOME`. The same order applies to `settings.yaml`.
+
+### Changed — a missing patch layer is said once
+
+`watchPatchFile` gains `onMissing`, called once when no candidate file exists at
+all; the engine prints `[compaction] WARNING … no profile patch layer found
+(tried …)` naming the paths. A candidate that exists but carries no entry for
+this plugin stays silent — that is a profile configured elsewhere, not a missing
+layer.
+
 ## [0.5.10] - 2026-11-26
 
 ### Fixed — installing the plugin now actually takes over compaction

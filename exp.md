@@ -4,6 +4,50 @@
 
 ---
 
+## [2026-11-28] Windows 桌面版：`HOME` 不存在 → 策略文档为空 → 阈值静默回落 0.8
+
+**问题**：Win11 desktop profile，补丁里写着 `threshold: 0.42`，设置卡片也显示 42%，
+但会话到 74% 都不自动压缩；唯一一次压力门触发发生在 68%。
+
+**根因**：`settings-file.js` 用 `env.DSH_HOME ?? join(env.HOME ?? '', '.dsh')` 解析 home。
+Windows 没有 `HOME`，桌面版 host 子进程也不导出 `DSH_HOME`（`desktopNodeEnvironment` 只透传
+Electron 的 env），cwd 是 `profiles/desktop`，于是 `home = '.dsh'`（相对路径），每个候选都
+解析到 `…/profiles/desktop/.dsh/profiles/desktop/cordis.patch.yml` —— 不存在。
+`watchPatchFile` 把 ENOENT 当"正常情况"静默跳过；引擎行 `compaction-control` 自身没有
+config，只能靠读文件拿到策略 → 空文档 → `resolvePolicy({})` → 0.8 / 0.16 / maxTokens 8192。
+设置卡片走 loader 合并后的行 config，所以显示的 42% 是对的。0.5.11→0.5.14 只改了
+index.js / policy.js，settings-file.js 一字未动，升级不解决问题。
+
+**怎么确定的**（桌面版 host 的 stderr 不落盘——主进程只在内存留最后 64 KiB，host 退出报错时才展示，
+所以 `engine up` / `FAILED` / `compact-debug` 历史上都查不到，只能用会话日志里的"引擎指纹"）：
+1. `compaction/summary` 的 `maxTokens` 区分引擎：8192 = 本插件 `DEFAULT_MAX_TOKENS`；
+   65536 = 官方引擎（`/compact` 经 preset isolate 里的 `command-compact` → 官方 `compaction-basic`）。
+2. 压力门的 `measure()` 锚定在 provider usage 上（即 UI 显示的数）。官方公式
+   `min(window×ratio, window − 请求maxTokens − 65536)`：当时请求 maxTokens=256000，0.8 → 678,464；
+   turn 66 的 step 8/9/10 usage = 675,698 / 676,611 / 677,265 不触发，step 11 = 680,081 触发。
+   若是 0.42（420k），前一天晚上就该触发。
+3. 真机复现：Win11 上用桌面 runtime 自带的 node、清掉 `HOME`、cwd 设为 `profiles/desktop`，
+   跑插件自己的 `patchFilePaths()` → `exists=false`；修复后 → `exists=true`。
+
+**解决**：`resolveDshHome(env, hostHome)`：宿主报告的 `profileContext.home` → 非空 `DSH_HOME`
+（展开 `~`）→ `os.homedir()/.dsh`，与核心 `dsh-home-paths` 同序；`index.js` 把
+`profileContext.home` 透传给两个 reader；`watchPatchFile` 新增 `onMissing`，所有候选都不存在时
+打一次 WARNING 并列出路径。
+
+**教训**：
+- **解析用户目录永远用 `os.homedir()`**（Windows 读 `USERPROFILE`）；`process.env.HOME` 在
+  Windows 上不存在。兄弟插件里 `dsh-llm-resilience` 的写法（`DSH_HOME` → `homedir()/.dsh`）是对的，
+  新插件照抄这个顺序，最好直接用宿主提供的 `profileContext.home` / `dshHomePath`。
+- **e2e / 单测为什么没抓到**：两者都用 `DSH_HOME=<tmp>` 重定向 home 来隔离，恰好绕过了出错的
+  回退分支；macOS / Linux 有 `$HOME`，回退分支即使走到也是对的。要测"环境里什么都没有"，
+  必须显式删掉 `HOME` / `DSH_HOME` 再断言路径是绝对的（已加测试）。
+- **"某个候选缺失是正常情况"和"全部缺失"要分开**：前者每秒发生，后者意味着引擎在用内置默认值
+  跑，至少打一行带路径的 WARNING。
+- **Windows 真机跑测试的价值再次兑现**：`resolve()` 让 POSIX 风格的 fixture 在 Windows 上变成
+  `C:\home\x`，三条断言随即失败——产品行为是对的，断言是平台相关的。期望值也要过 `resolve()`。
+- **桌面版诊断盲区**：host stderr 不落盘，以后这类问题只能靠会话日志里的 `maxTokens`、`usage`、
+  `request/header.config.maxTokens` 反推。
+
 ## [2026-11-26] 插件"装上就等于接管"才是对的，出厂 disabled 是灾难
 
 **问题**：Win11 的 desktop profile 装了本插件，设置卡片正常、阈值读得回来，但压缩一次都不触发。
