@@ -4,6 +4,31 @@
 
 ---
 
+## [2026-11-28] OIDC 发布一直被跳过：探测脚本只认 200，而 npm 换 token 回 201
+
+**问题**：tag 一推，`publish.yml` 的 OIDC 探测步骤失败，npm publish 和 Release 全部 skipped；
+v0.5.13 / v0.5.14 / v0.5.15 三次都如此。11-25 的结论写在工作流头部："trusted publisher 配得再对也没用，
+GitHub 对新仓库强制 immutable subject claim，npm registry 匹配不上（npm/cli#9969）"。
+
+**根因**：结论过时 + 脚本假设错。v0.5.15 那次 run 的探测输出：
+`exchange HTTP 201` + `{"created","expires","token"}` —— trusted publisher **已配且能匹配** immutable sub。
+失败只因脚本写的是 `if [ "$STATUS" != "200" ]`，端点成功回的是 **201 Created**，成功被判成失败。
+
+**怎么发现的**：把三个包的探测结果并排看：本包 201，两个兄弟包 404，left-pad 404。本包 201 就说明
+npm 侧没问题；再看权威那次交换（第 201 行）也是 201。日志里一直有答案，只是步骤红了之后没人读探测行。
+
+**解决**：接受 200 | 201；头部注释改成实测事实。用桩 curl（回 201）在本地跑探测脚本：新逻辑 exit 0，
+旧逻辑 exit 1。
+
+**教训**：
+- **"配了但走不通"的结论要带日期，并在每次发布时复核**——上游（npm）修没修不归我们控制，11-25 的
+  判断到 11-28 就失效了，而工作流把它写成了永久前提。
+- **探测 HTTP 状态码永远接受 2xx 整段**，不要写死 200；端点升级回 201 就会把成功判成失败，且这类
+  失败"看起来像配置问题"，把人引去重配一个本来就对的设置。
+- **诊断型探测要把"成功长什么样"写进注释并随实测更新**（第 150 行原写 "200 + token"）。
+- 兄弟仓库 `dsh-llm-resilience` / `dsh-web-fallback-chain` 的 publish.yml 有同一个 `!= "200"`，
+  且它们的交换探测是 404 —— 它们的 trusted publisher 要在 npmjs.com 上（重新）配。
+
 ## [2026-11-28] Windows 桌面版：`HOME` 不存在 → 策略文档为空 → 阈值静默回落 0.8
 
 **问题**：Win11 desktop profile，补丁里写着 `threshold: 0.42`，设置卡片也显示 42%，

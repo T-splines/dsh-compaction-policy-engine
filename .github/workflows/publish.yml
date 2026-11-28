@@ -10,20 +10,20 @@
 # OIDC 用工作流自己的短时身份换发布凭据：没有 token 可泄露、没有 90 天轮换、
 #   也不会再出现「发版前才发现 token 过期」。
 #
-# ⚠ 2026-11-25 结论：这条路目前走不通，不是配置问题。
+# ✅ 2026-11-28 实测：OIDC 这条路是通的，trusted publisher 已配且能匹配。
 #   GitHub 自 2026-07-15 起对新仓库强制 immutable subject claim：
-#     sub = repo:T-splines@95456842/dsh-compaction-policy-engine@1459101202:ref:refs/tags/v0.5.6
-#   npm registry 拿这个 sub 去匹配 trusted publisher 记录时匹配不上，一律回
-#   {"message":"OIDC token exchange error - package not found"}（npm/cli#9969，
-#   仍 open，Priority 1）。本仓库建于 2026-11-15，必然是这个格式；
-#   实测 PUT /repos/.../actions/oidc/customization/sub {use_default:false,
-#   use_immutable_subject:false} 返回 201 但 GET 仍是 true —— GitHub 不让关。
-#   对照：2026-07-15 之前建的仓库（如 T-splines/AI_Reader）immutable=False，
-#   走旧格式，OIDC 可用。
+#     sub = repo:T-splines@95456842/dsh-compaction-policy-engine@1459101306:ref:refs/tags/v0.5.15
+#   2026-11-25 曾判定 npm registry 匹配不上这种 sub、一律回 "package not found"
+#   （npm/cli#9969），并实测 GitHub 不让关 immutable（PUT …/oidc/customization/sub
+#   返回 201 但 GET 仍是 true）。
+#   2026-11-28 v0.5.15 的 Publish run 里，交换端点对同一个 immutable sub 返回
+#   HTTP 201 + {"created","expires","token"} —— npm 侧已能匹配。那次仍然没自动发出去，
+#   唯一原因是探测脚本只认 200，把 201 判成了失败（已修）。当时 0.5.15 用本机 token 手发。
 #
-#   所以 trusted publisher 配得再对也没用。当前发版走本机 token
-#   （Keychain npm-token-oss + scripts/npm-publish-keychain.sh）。
-#   npm 修好 #9969 之后，这个 workflow 不用改就能自动接管。
+#   0.5.15 之后：tag 一推，这个 workflow 自动接管 npm publish（OIDC，无长期 token）
+#   和 GitHub Release。本机 token（Keychain npm-token-oss + scripts/npm-publish-keychain.sh）
+#   只作兜底。注意 npm 的规则：trusted publisher 配置建好后须在 2 天内完成一次成功发布，
+#   否则过期要重建（见下）。
 #
 # 一次性人工前置（等 npm 修复后才需要）：
 #   npmjs.com → Packages → @magic6/dsh-compaction-policy-engine → Settings → Trusted publishing
@@ -147,7 +147,7 @@ jobs:
 
           # 直接打 npm 用来换 publishing token 的那个端点，把 registry 的原话打出来。
           # 比反复猜「ENEEDAUTH 是 id-token 权限还是 trusted publisher 没配」快得多：
-          # 这个端点 404/401 => 包里没有匹配的 trusted publisher；200 + token => 配置是对的。
+          # 这个端点 404/401 => 包里没有匹配的 trusted publisher；2xx + token（实测 201）=> 配置是对的。
           PKG="$(node -p "require('./package.json').name")"
           # 用 npm 自己的转义规则（npa.escapedName），不要手搓 encodeURIComponent：
           # npa 产出小写 %2f，手搓是大写 %2F。路由大小写敏感时这个差别会伪装成
@@ -203,7 +203,9 @@ jobs:
             -H "Authorization: Bearer ${ID_TOKEN}" || true)"
           echo "exchange HTTP ${STATUS}"
           echo "exchange body: $(head -c 400 "${BODY_FILE}")"
-          if [ "${STATUS}" != "200" ]; then
+          # 端点成功时回 201 Created（2026-11-28 实测：{"created":…,"token":…}），
+          # 不是 200。此前只认 200，把成功判成失败，发布和 Release 一直被跳过。
+          if [ "${STATUS}" != "200" ] && [ "${STATUS}" != "201" ]; then
             # 说清 404 的两种可能，别让人去重配一个本来就对的设置：
             # 本仓库建于 2026-11-15，GitHub 对新仓库强制 immutable subject claim，
             # sub = repo:T-splines@95456842/dsh-compaction-policy-engine@1459101202:ref:...
