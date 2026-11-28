@@ -41,6 +41,9 @@ jobs:
   # 端到端：真的起一个 dsh、加载这个包、让压缩门槛真的被跨过。
   # 0.5.9 靠这一层抓到三个单元测试测不出的 bug（诊断撒谎、读错 profile、
   # 告警永不打印）。不需要任何 API key（假 provider 指向 127.0.0.1）。
+  # node 必须跟 dsh 走：`@deepseek-ai/dsh@0.2.2-rc.5` 声明 `engines.node >=24.9.0`，
+  # 在 node 22 上 `dsh plugin add` 直接失败，e2e 在"准备"阶段就退出（2026-11-28 查实，
+  # v0.5.13/v0.5.14 两次 CI 的 e2e 都是这样红的，与被测代码无关）。
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -48,7 +51,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - run: npm install --no-audit --no-fund
       - run: npm install --global @deepseek-ai/dsh@0.2.2-rc.5
       - name: Run e2e scenarios

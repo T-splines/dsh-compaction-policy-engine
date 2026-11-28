@@ -47,8 +47,12 @@ prepare() {
 	local prof="$DSH_HOME/profiles/headless"
 	[ -d "$prof" ] || { echo "无法创建临时 profile: $prof" >&2; exit 1; }
 
-	( cd "$prof" && "$DSH_BIN" plugin --profile headless add "$PLUGIN_SPEC" >/dev/null 2>&1 ) \
-		|| { echo "插件安装失败: $PLUGIN_SPEC" >&2; exit 1; }
+	# 安装输出留底：失败时必须把 dsh 自己的话打出来。2026-11-28 之前这里把 stderr
+	# 丢进 /dev/null，CI 上 node 22 跑着要求 node >=24.9 的 dsh，日志里只剩一行
+	# "插件安装失败"，看不出原因。
+	local install_log="$WORK/plugin-install.log"
+	( cd "$prof" && "$DSH_BIN" plugin --profile headless add "$PLUGIN_SPEC" >"$install_log" 2>&1 ) \
+		|| { echo "插件安装失败: $PLUGIN_SPEC" >&2; echo "--- dsh plugin add 输出 ---" >&2; cat "$install_log" >&2; exit 1; }
 
 	cat > "$prof/cordis.patch.yml" <<YAML
 # 压缩引擎端到端场景 profile（由 e2e/run.sh 生成，每次跑都覆盖）。
